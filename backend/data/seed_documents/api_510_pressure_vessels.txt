@@ -1,0 +1,18 @@
+API STANDARD 510: PRESSURE VESSEL INSPECTION CODE
+Maintenance Inspection, Rating, Repair, and Alteration
+
+Section 7.1: Determination of Corrosion Rate and Remaining Life
+The corrosion rate (Cr) shall be calculated using the following formula:
+    Cr = (t_initial - t_actual) / Time_in_service
+
+The remaining life (RL) of the vessel in years is calculated as:
+    RL = (t_actual - t_minimum) / Cr
+
+Where:
+- t_initial: Thickness measured at initial baseline inspection (mm or inches).
+- t_actual: Thickness measured at current ultrasonic testing (UT) inspection.
+- t_minimum: Minimum required thickness calculated per ASME Section VIII Div 1.
+- Cr: Corrosion rate (mm/year or inches/year).
+
+Mandatory Directives:
+If remaining life is less than 2.0 years, the inspection interval shall be shortened and an immediate maintenance turnaround schedule must be approved by the Asset Integrity Engineer.

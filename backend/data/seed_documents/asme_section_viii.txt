@@ -1,0 +1,17 @@
+ASME BOILER & PRESSURE VESSEL CODE (BPVC)
+Section VIII Division 1: Rules for Construction of Pressure Vessels
+
+Part UG: General Requirements for All Methods of Construction
+UG-27: Thickness of Shells Under Internal Pressure
+
+For cylindrical shells, the minimum required thickness (t_min) is determined by:
+    t_min = (P * R) / (S * E - 0.6 * P)
+
+Where:
+- P: Internal design pressure (MPa or psi).
+- R: Inside radius of the shell course under consideration (mm or inches).
+- S: Maximum allowable stress value of material at design temperature (MPa or psi).
+- E: Joint efficiency for longitudinal joints (typically 0.85 for spot RT, 1.0 for full RT).
+
+Safety Factor & Joint Inspection:
+All circumferential and longitudinal weld seams shall be inspected using non-destructive testing (NDT). If operating temperature exceeds 300 deg C, creep and thermal fatigue limits must be evaluated.

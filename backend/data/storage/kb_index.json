@@ -1,0 +1,121 @@
+{
+  "documents": {
+    "DOC-1788066255800-API510Pressu": {
+      "doc_id": "DOC-1788066255800-API510Pressu",
+      "filename": "API 510 Pressure Vessel Inspection Standard",
+      "saved_path": null,
+      "size_bytes": 197,
+      "character_count": 197,
+      "chunk_count": 1,
+      "category": "STANDARDS",
+      "created_at": 1788066255.800779,
+      "file_type": "text"
+    },
+    "DOC-1788066272452-asmesec8txt": {
+      "doc_id": "DOC-1788066272452-asmesec8txt",
+      "filename": "asme_sec8.txt",
+      "saved_path": "/Users/devanshkumarverma/Desktop/PS117-v2.0.0/backend/data/storage/kb_docs/DOC-1788066272452-asmesec8txt_asme_sec8.txt",
+      "size_bytes": 115,
+      "character_count": 115,
+      "chunk_count": 1,
+      "created_at": 1788066272.452678,
+      "file_type": "txt"
+    },
+    "DOC-1788066291433-asmesec8txt": {
+      "doc_id": "DOC-1788066291433-asmesec8txt",
+      "filename": "asme_sec8.txt",
+      "saved_path": "/Users/devanshkumarverma/Desktop/PS117-v2.0.0/backend/data/storage/kb_docs/DOC-1788066291433-asmesec8txt_asme_sec8.txt",
+      "size_bytes": 115,
+      "character_count": 115,
+      "chunk_count": 1,
+      "created_at": 1788066291.433871,
+      "file_type": "txt"
+    },
+    "DOC-1788068456439-API510Pres": {
+      "doc_id": "DOC-1788068456439-API510Pres",
+      "filename": "API 510 Pressure Vessel Inspection Standard",
+      "title": "API 510 Pressure Vessel Inspection Standard",
+      "category": "STANDARDS",
+      "size_bytes": 197,
+      "character_count": 197,
+      "chunk_count": 1,
+      "file_type": "txt",
+      "created_at": 1788068456.439061
+    },
+    "DOC-1788068470639-API510Pres": {
+      "doc_id": "DOC-1788068470639-API510Pres",
+      "filename": "API 510 Pressure Vessel Inspection Standard",
+      "title": "API 510 Pressure Vessel Inspection Standard",
+      "category": "STANDARDS",
+      "size_bytes": 197,
+      "character_count": 197,
+      "chunk_count": 1,
+      "file_type": "txt",
+      "created_at": 1788068470.639777
+    },
+    "DOC-1788070810383-API510Pres": {
+      "doc_id": "DOC-1788070810383-API510Pres",
+      "filename": "API 510 Pressure Vessel Inspection Standard",
+      "title": "API 510 Pressure Vessel Inspection Standard",
+      "category": "STANDARDS",
+      "size_bytes": 197,
+      "character_count": 197,
+      "chunk_count": 1,
+      "file_type": "txt",
+      "created_at": 1788070810.383511
+    }
+  },
+  "chunks": [
+    {
+      "chunk_id": "DOC-1788066255800-API510Pressu-CHK-1",
+      "doc_id": "DOC-1788066255800-API510Pressu",
+      "filename": "API 510 Pressure Vessel Inspection Standard",
+      "chunk_index": 1,
+      "total_chunks": 1,
+      "text": "API 510 Section 7.1 specifies calculation of corrosion rate and remaining life: Cr = (t_initial - t_actual) / Time. If remaining life is under 2 years, immediate maintenance turnaround is required."
+    },
+    {
+      "chunk_id": "DOC-1788066272452-asmesec8txt-CHK-1",
+      "doc_id": "DOC-1788066272452-asmesec8txt",
+      "filename": "asme_sec8.txt",
+      "chunk_index": 1,
+      "total_chunks": 1,
+      "text": "ASME Section VIII Div 1: Internal design pressure calculations and allowable stress values for carbon steel plates."
+    },
+    {
+      "chunk_id": "DOC-1788066291433-asmesec8txt-CHK-1",
+      "doc_id": "DOC-1788066291433-asmesec8txt",
+      "filename": "asme_sec8.txt",
+      "chunk_index": 1,
+      "total_chunks": 1,
+      "text": "ASME Section VIII Div 1: Internal design pressure calculations and allowable stress values for carbon steel plates."
+    },
+    {
+      "chunk_id": "DOC-1788068456439-API510Pres-c1",
+      "doc_id": "DOC-1788068456439-API510Pres",
+      "filename": "API 510 Pressure Vessel Inspection Standard",
+      "title": "API 510 Pressure Vessel Inspection Standard",
+      "chunk_index": 1,
+      "total_chunks": 1,
+      "text": "API 510 Section 7.1 specifies calculation of corrosion rate and remaining life: Cr = (t_initial - t_actual) / Time. If remaining life is under 2 years, immediate maintenance turnaround is required."
+    },
+    {
+      "chunk_id": "DOC-1788068470639-API510Pres-c1",
+      "doc_id": "DOC-1788068470639-API510Pres",
+      "filename": "API 510 Pressure Vessel Inspection Standard",
+      "title": "API 510 Pressure Vessel Inspection Standard",
+      "chunk_index": 1,
+      "total_chunks": 1,
+      "text": "API 510 Section 7.1 specifies calculation of corrosion rate and remaining life: Cr = (t_initial - t_actual) / Time. If remaining life is under 2 years, immediate maintenance turnaround is required."
+    },
+    {
+      "chunk_id": "DOC-1788070810383-API510Pres-c1",
+      "doc_id": "DOC-1788070810383-API510Pres",
+      "filename": "API 510 Pressure Vessel Inspection Standard",
+      "title": "API 510 Pressure Vessel Inspection Standard",
+      "chunk_index": 1,
+      "total_chunks": 1,
+      "text": "API 510 Section 7.1 specifies calculation of corrosion rate and remaining life: Cr = (t_initial - t_actual) / Time. If remaining life is under 2 years, immediate maintenance turnaround is required."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+GENERAL FINANCIAL RULES (GFR) 2017
+Ministry of Finance, Government of India - Public Procurement Guidelines
+
+Rule 144: Fundamental Principles of Public Procurement
+Every authority delegated with the financial powers of procuring goods in public interest shall have the responsibility and accountability to bring efficiency, economy, and transparency in matters relating to public procurement.
+
+Key Requirements:
+1. Description of Goods: The specifications shall be clearly set forth in terms of performance and functional requirements without referencing proprietary brands.
+2. Technical Evaluation: Tenders exceeding threshold values require technical scrutiny by an independent Technical Evaluation Committee (TEC).
+3. Local Content & Make in India: Preference shall be given to Class-I and Class-II local suppliers in accordance with the Public Procurement (Preference to Make in India) Order.
+4. Transparency: All tender notices, evaluation criteria, and contract awards must be published on the Central Public Procurement Portal (CPPP) and Government e-Marketplace (GeM).

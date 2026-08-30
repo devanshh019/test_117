@@ -1,0 +1,1 @@
+ASME Section VIII Div 1: Internal design pressure calculations and allowable stress values for carbon steel plates.
