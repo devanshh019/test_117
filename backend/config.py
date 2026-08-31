@@ -115,7 +115,7 @@ PPTX_TRIGGERS = [
 
 DOCX_TRIGGERS = [
     "word", "docx", "approval note", "report", "document",
-    "draft note", "memo", "technical note", "brief"
+    "draft note", "memo", "technical note", "briefing note", "brief"
 ]
 
 XLSX_TRIGGERS = [
@@ -123,25 +123,37 @@ XLSX_TRIGGERS = [
     "calculation sheet", "data sheet", "sheet"
 ]
 
-VISUAL_TRIGGERS = [
-    "visual", "drawing", "draw", "diagram", "plot",
-    "schematic", "chart", "graph", "p&id", "audit"
+VISUAL_AND_DRAWING_TRIGGERS = [
+    "p&id", "pid", "drawing", "schematic", "isometric", "blueprint",
+    "control valve", "bypass", "transmitter", "flowsheet", "flow sheet",
+    "process flow", "ocr", "scanned", "image", "photo", "photograph",
+    "ultrasonic scan", "interlock diagram"
 ]
 
-MATH_CODE_TRIGGERS = [
-    "simulate", "simulation", "python", "code", "coding", "plot", "plotting",
+STANDARDS_AND_GOVERNANCE_TRIGGERS = [
+    "api", "api 510", "api 570", "asme", "bpvc", "gfr", "gfr-2017",
+    "standard", "compliance", "audit", "regulation", "pressure vessel",
+    "boiler", "turnaround", "inspection report", "wall thickness",
+    "allowable stress", "tender", "procurement", "corrosion rate",
+    "remaining life", "sop", "manual", "policy", "joint efficiency"
+]
+
+MATH_AND_CODE_TRIGGERS = [
+    # Engineering Mathematics & Numerical Calculations
     "math", "mathematics", "calculate", "calculation", "compute", "computation",
-    "sum", "summation", "calculus", "formula", "lmtd", "differentiate",
-    "integral", "integration", "sympy", "numpy", "solve", "equation", "arithmetic",
-    "heat exchanger", "draw", "drawing", "graph", "chart", "diagram", "line",
-    "curve", "visualize", "algorithm", "script", "evaluate", "derive", "numbers",
-    "fibonacci", "factorial", "matrix", "loop"
+    "derive", "derivation", "algebra", "calculus", "integral", "integration",
+    "derivative", "differentiate", "differential equation", "ode", "matrix",
+    "eigenvalue", "vector", "numerical", "arithmetic", "statistics", "formula",
+    "lmtd", "reynolds", "nusselt", "prandtl", "heat duty", "steps shown",
+    "show steps", "solve for", "solve", "equation", "sympy", "numpy", "scipy",
+    "logarithm", "exponent", "trigonometry",
+    # Code & Internal Tools
+    "python", "code", "coding", "script", "scripting", "function",
+    "algorithm", "program", "loop", "fibonacci", "factorial",
+    "def ", "class ", "parse", "regex", "lambda", "binary search",
+    "bubble sort", "write code", "write a script", "simulate",
+    "simulation", "sandbox script"
 ]
 
 
-
-STANDARDS_TRIGGERS = [
-    "api", "asme", "gfr", "standard", "code",
-    "sop", "refinery", "column", "vessel", "turnaround", "tender"
-]
 

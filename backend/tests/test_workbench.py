@@ -19,13 +19,20 @@ class TestSovereignWorkbench(unittest.TestCase):
         """Verify dynamic router classifies tasks and auto-selects specialized models"""
         res_code = router.route_task("Write a python script to simulate heat exchanger LMTD and calculate heat duty")
         self.assertEqual(res_code.task_category, "ENGINEERING_MATH_AND_CODE")
-        expected_math_model = get_model_for_task("ENGINEERING_MATH_AND_CODE").get("id")
-        self.assertEqual(res_code.selected_model_id, expected_math_model)
+        expected_code_model = get_model_for_task("ENGINEERING_MATH_AND_CODE").get("id")
+        self.assertEqual(res_code.selected_model_id, expected_code_model)
+
+
+        res_vision = router.route_task("Inspect P&ID for crude-free blast train, identify all control valves, transmit, check bypass")
+        self.assertEqual(res_vision.task_category, "MULTIMODAL_IMAGE_INSPECTION")
+        expected_vision_model = get_model_for_task("MULTIMODAL_IMAGE_INSPECTION").get("id")
+        self.assertEqual(res_vision.selected_model_id, expected_vision_model)
 
         res_doc = router.route_task("Generate a Word document approval note and PowerPoint presentation deck")
         self.assertEqual(res_doc.task_category, "ENTERPRISE_DELIVERABLE_SYNTHESIS")
         expected_doc_model = get_model_for_task("ENTERPRISE_DELIVERABLE_SYNTHESIS").get("id")
         self.assertEqual(res_doc.selected_model_id, expected_doc_model)
+
 
 
 

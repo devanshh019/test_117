@@ -5,8 +5,9 @@ from .config import (
     PPTX_TRIGGERS,
     DOCX_TRIGGERS,
     XLSX_TRIGGERS,
-    MATH_CODE_TRIGGERS,
-    STANDARDS_TRIGGERS,
+    VISUAL_AND_DRAWING_TRIGGERS,
+    STANDARDS_AND_GOVERNANCE_TRIGGERS,
+    MATH_AND_CODE_TRIGGERS,
 )
 from .model_manager import get_model_for_task
 
@@ -38,17 +39,32 @@ class DynamicTaskRouter:
         )
 
     def _determine_category(self, prompt_lower: str, has_image: bool, has_doc: bool) -> tuple[str, str]:
-        if has_image:
-            return "MULTIMODAL_IMAGE_INSPECTION", "Attached visual image/diagram"
+        # 1. Image Attachments or Explicit P&ID / Drawing / Schematic Queries
+        if has_image or any(k in prompt_lower for k in VISUAL_AND_DRAWING_TRIGGERS):
+            return "MULTIMODAL_IMAGE_INSPECTION", "P&ID schematic, drawing, or visual inspection"
+
+        # 2. Document Attachments
         if has_doc:
             return "DOCUMENT_RAG_ANALYSIS", "Attached reference document"
-        if any(k in prompt_lower for k in MATH_CODE_TRIGGERS):
-            return "ENGINEERING_MATH_AND_CODE", "Engineering calculation or Python code simulation"
+
+        # 3. Office Deliverables (.docx, .pptx, .xlsx)
         if any(k in prompt_lower for k in (PPTX_TRIGGERS + DOCX_TRIGGERS + XLSX_TRIGGERS)):
             return "ENTERPRISE_DELIVERABLE_SYNTHESIS", "Office deliverable generation (Word / Excel / PPTX)"
-        if any(k in prompt_lower for k in STANDARDS_TRIGGERS):
+
+        # 4. Standards & Governance (pure compliance/audit lookup without explicit math calculation)
+        if any(k in prompt_lower for k in STANDARDS_AND_GOVERNANCE_TRIGGERS) and not any(k in prompt_lower for k in ["calculate", "compute", "derive", "solve", "integral", "derivative", "python", "script", "code", "plot", "simulate"]):
             return "STANDARDS_AND_GOVERNANCE_REASONING", "Plant standards lookup and compliance review"
-        return "GENERAL_ENGINEERING_REASONING", "General technical reasoning"
+
+        # 5. Engineering Math, Numerical Calculations & Python Scripting
+        if any(k in prompt_lower for k in MATH_AND_CODE_TRIGGERS):
+            return "ENGINEERING_MATH_AND_CODE", "Engineering mathematics, calculation, or Python simulation"
+
+        # 6. Standards fallback
+        if any(k in prompt_lower for k in STANDARDS_AND_GOVERNANCE_TRIGGERS):
+            return "STANDARDS_AND_GOVERNANCE_REASONING", "Plant standards lookup and compliance review"
+
+        # 7. Default: General Technical & Engineering Reasoning
+        return "GENERAL_ENGINEERING_REASONING", "General engineering and technical reasoning"
 
     def route_task(
         self,

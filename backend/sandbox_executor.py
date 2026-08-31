@@ -58,6 +58,18 @@ class SandboxedPythonExecutor:
             f"            pass\n"
             f"    return _orig_close(*args, **kwargs)\n"
             f"plt.close = _patched_close\n\n"
+            f"_orig_plot = plt.plot\n"
+            f"def _safe_plot(*args, **kwargs):\n"
+            f"    args_list = list(args)\n"
+            f"    if len(args_list) >= 2:\n"
+            f"        x, y = args_list[0], args_list[1]\n"
+            f"        if isinstance(x, (list, np.ndarray)) and not isinstance(y, (list, np.ndarray)) and isinstance(y, (int, float, np.number)):\n"
+            f"            args_list[1] = np.full_like(x, float(y))\n"
+            f"        elif isinstance(y, (list, np.ndarray)) and not isinstance(x, (list, np.ndarray)) and isinstance(x, (int, float, np.number)):\n"
+            f"            args_list[0] = np.full_like(y, float(x))\n"
+            f"    return _orig_plot(*args_list, **kwargs)\n"
+            f"plt.plot = _safe_plot\n\n"
+
         )
         footer = (
             f"\n\nif plt.get_fignums() and not os.path.exists(_target_plot_path):\n"

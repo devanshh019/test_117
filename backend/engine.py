@@ -167,9 +167,10 @@ class SovereignAgentEngine:
         if decision.task_category in ["STANDARDS_AND_GOVERNANCE_REASONING", "DOCUMENT_RAG_ANALYSIS", "ENTERPRISE_DELIVERABLE_SYNTHESIS"]:
             return True
 
-        from .config import STANDARDS_TRIGGERS
-        if any(k in prompt_lower for k in STANDARDS_TRIGGERS):
+        from .config import STANDARDS_AND_GOVERNANCE_TRIGGERS
+        if any(k in prompt_lower for k in STANDARDS_AND_GOVERNANCE_TRIGGERS):
             return True
+
 
         rag_keywords = [
             # Standards & Regulatory
@@ -233,9 +234,8 @@ class SovereignAgentEngine:
             f"Assigned Task Category: {decision.task_category}",
             "Operating Guidelines:",
             "- Respond clearly with rigorous technical engineering analysis.",
-            "- Code & Visualizations: Whenever asked to draw, plot, chart, graph, or simulate anything (such as straight lines, curves, waveforms, heat transfer, or engineering schematics), you MUST generate an executable Python script using `matplotlib.pyplot` (`plt.plot()`, `plt.title()`, `plt.grid(True)`) inside a single ```python ... ``` code block. The on-premises execution sandbox automatically runs your code and renders the visual graphic for the user. Never say you cannot draw.",
+            "- Code & Visualizations: When generating Python simulations or Matplotlib plots, write fully valid and executable code. Ensure matching array dimensions when calling plt.plot(x, y). For single threshold or limit markers (e.g. t_min, allowable stress, setpoint), use `plt.axvline(x=val, color='red', linestyle='--', label='Limit')` or matching 2D array pairs `plt.plot([val, val], [y_min, y_max])`. Always put executable Python code in a ```python ... ``` block.",
         ]
-
 
         if attached_text:
             parts.append(f"\nUser Attached Documents:\n{attached_text}")
@@ -246,23 +246,61 @@ class SovereignAgentEngine:
         return "\n\n".join(parts)
 
     def _run_sandbox_if_code_present(
-        self, raw_response: str
-    ) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
-        """Extracts and runs Python code in isolated sandbox if detected."""
+        self, raw_response: str, model_id: Optional[str] = None
+    ) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], str]:
+        """Extracts and runs Python code in isolated sandbox if detected, with iterative self-healing."""
         code = self._extract_python_code(raw_response)
         if not code:
-            return [], None
+            return [], None, raw_response
 
         step_start = time.time()
         res = sandbox.execute(code, script_name_prefix="exec_sim")
+
+        healed = False
+        # Agentic Self-Healing Iteration if execution failed
+        if not res["success"] and model_id and res.get("stderr"):
+            err_snippet = res["stderr"].strip()[-1000:]
+            retry_prompt = f"""You wrote Python code that failed with an execution error in the local sandbox.
+Execution Error Traceback:
+```
+{err_snippet}
+```
+Failed Code:
+```python
+{code}
+```
+DIAGNOSIS & REPAIR DIRECTIVES:
+1. If using Matplotlib to mark a threshold or single value (like t_min, allowable stress, or a target level), use `plt.axvline(x=t_min, color='red', linestyle='--', label='Limit')` or pass matching array shapes like `plt.plot([t_min, t_min], [0, 1])`. Never pass a single scalar and an array together into plt.plot().
+2. Ensure all imports (e.g. numpy, matplotlib.pyplot) and variable dimensions are completely valid and executable.
+3. Output the repaired, working Python script inside a single ```python ... ``` block."""
+
+            try:
+                repair_res = self.inference.generate(retry_prompt, model_id=model_id)
+                if repair_res.get("success"):
+                    repaired_code = self._extract_python_code(repair_res.get("response", ""))
+                    if repaired_code and repaired_code != code:
+                        res2 = sandbox.execute(repaired_code, script_name_prefix="exec_sim_repaired")
+                        if res2["success"]:
+                            res = res2
+                            raw_response = raw_response.replace(code, repaired_code)
+                            code = repaired_code
+                            healed = True
+            except Exception:
+                pass
+
         elapsed_ms = int((time.time() - step_start) * 1000)
+
+        status = "COMPLETED" if res["success"] else "WARNING"
+        details = f"Code executed in {res['elapsed_seconds']}s (Exit code: {res['exit_code']})."
+        if healed:
+            details += " [Self-healed & verified on Iteration 2]"
 
         step = {
             "step_id": 5,
             "title": "Sandboxed Python Execution & Verification",
-            "status": "COMPLETED" if res["success"] else "WARNING",
+            "status": status,
             "duration_ms": max(1, elapsed_ms),
-            "details": f"Code executed in {res['elapsed_seconds']}s (Exit code: {res['exit_code']}).",
+            "details": details,
         }
 
         deliverables = []
@@ -288,7 +326,8 @@ class SovereignAgentEngine:
             "stderr": res["stderr"],
         })
 
-        return deliverables, step
+        return deliverables, step, raw_response
+
 
     def _generate_requested_documents(
         self,
@@ -440,12 +479,14 @@ class SovereignAgentEngine:
         })
 
         raw_response = llm_result.get("response", "")
+        effective_model = override_model or decision.selected_model_id
 
-        # 5. Sandbox Code Execution
-        code_deliverables, code_step = self._run_sandbox_if_code_present(raw_response)
+        # 5. Sandbox Code Execution (with Self-Healing Iteration)
+        code_deliverables, code_step, raw_response = self._run_sandbox_if_code_present(raw_response, model_id=effective_model)
         if code_step:
             steps.append(code_step)
         all_deliverables.extend(code_deliverables)
+
 
         # 6. Deliverable Generation
         topic = self._extract_clean_topic(prompt)
