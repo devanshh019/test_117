@@ -10,7 +10,9 @@ from .config import (
     SANDBOX_TIMEOUT_SECONDS,
     SANDBOX_PLOT_DPI,
     SANDBOX_MPL_CONFIG_DIR,
+    SANDBOX_MAX_OUTPUT_CHARS,
 )
+
 
 
 class SandboxedPythonExecutor:
@@ -108,17 +110,21 @@ class SandboxedPythonExecutor:
             elapsed = round(time.time() - start_time, 3)
             plots = self._collect_plots(plot_path, plot_name, start_time)
 
+            stdout_clean = (result.stdout or "")[:SANDBOX_MAX_OUTPUT_CHARS]
+            stderr_clean = (result.stderr or "")[:SANDBOX_MAX_OUTPUT_CHARS]
+
             return {
                 "success": result.returncode == 0,
                 "exit_code": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
+                "stdout": stdout_clean,
+                "stderr": stderr_clean,
                 "elapsed_seconds": elapsed,
                 "script_path": f"/api/artifacts/{script_name}",
                 "script_filename": script_name,
                 "plots": plots,
                 "code": code_str,
             }
+
         except subprocess.TimeoutExpired:
             return {
                 "success": False,

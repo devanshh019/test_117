@@ -2,32 +2,38 @@ import os
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
-# Base Directories & Paths
+# Base Directories & Storage Paths
 # -----------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
-STORAGE_DIR = BASE_DIR / "data" / "storage"
+DATA_DIR = BASE_DIR / "data"
+SEED_DOCS_DIR = DATA_DIR / "seed_documents"
+STORAGE_DIR = DATA_DIR / "storage"
 UPLOADS_DIR = STORAGE_DIR / "uploads"
-TEMP_UPLOADS_DIR = STORAGE_DIR / "temp_uploads"
 KB_DOCS_DIR = STORAGE_DIR / "kb_docs"
+CHROMA_DIR = STORAGE_DIR / "chroma_db"
+ON_PREMISES_CACHE_DIR = STORAGE_DIR / "on_premises_cache"
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+MODELS_YAML_PATH = BASE_DIR / "model.yaml"
+
 
 # Ensure runtime directories exist
-for directory in [STORAGE_DIR, UPLOADS_DIR, TEMP_UPLOADS_DIR, KB_DOCS_DIR]:
+
+for directory in [DATA_DIR, SEED_DOCS_DIR, STORAGE_DIR, UPLOADS_DIR, KB_DOCS_DIR, CHROMA_DIR, ON_PREMISES_CACHE_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
+
+
 # -----------------------------------------------------------------------------
-# Application & Sovereign Security Settings
+# Application Settings
 # -----------------------------------------------------------------------------
 APP_NAME = "KAVACH-AI"
-APP_TITLE = "KAVACH-AI Sovereign Industrial & PSU Workbench"
 APP_VERSION = "1.0.0"
-SOVEREIGN_ORGANIZATION = "KAVACH-AI Sovereign Industrial Operations"
-SECURITY_CLASSIFICATION = "CONFIDENTIAL // DEFENSE & PSU RESTRICTED"
-AIR_GAP_ENFORCED = True
-ALLOW_EXTERNAL_CALLS = False
+APP_TITLE = "KAVACH-AI Sovereign Industrial & PSU Workbench"
 HOST = "127.0.0.1"
 PORT = 8000
+
+
 
 # -----------------------------------------------------------------------------
 # Local Ollama Inference Settings
@@ -37,7 +43,7 @@ OLLAMA_TIMEOUT_SECONDS = 180.0
 OLLAMA_HEALTH_TIMEOUT_SECONDS = 1.0
 DEFAULT_MODEL_ID = "gemma3:4b"
 DEFAULT_MODEL_NAME = "Gemma 3 4B Sovereign Foundation"
-DEFAULT_MODEL_VRAM_GB = 3.4
+
 
 MODEL_TEMPERATURE = 0.2
 MODEL_TOP_P = 0.95
@@ -47,18 +53,20 @@ MAX_HISTORY_TURNS = 10
 # -----------------------------------------------------------------------------
 # Python Code Sandbox Execution Settings
 # -----------------------------------------------------------------------------
-SANDBOX_TIMEOUT_SECONDS = 15
+SANDBOX_TIMEOUT_SECONDS = 30
 SANDBOX_PLOT_DPI = 300
-SANDBOX_MPL_CONFIG_DIR = "/tmp/mpl_kavach_cache"
+SANDBOX_MAX_OUTPUT_CHARS = 10000
+SANDBOX_CONFIG_DIR = ON_PREMISES_CACHE_DIR
+SANDBOX_MPL_CONFIG_DIR = str(ON_PREMISES_CACHE_DIR)
+
 
 # -----------------------------------------------------------------------------
 # Local RAG & Document Ingestion Settings
 # -----------------------------------------------------------------------------
-RAG_CHUNK_SIZE = 600
-RAG_CHUNK_OVERLAP = 80
+RAG_CHUNK_SIZE = 1000
+RAG_CHUNK_OVERLAP = 200
 RAG_DEFAULT_TOP_K = 3
-RAG_MIN_SCORE = 0.1
-RAG_MAX_SCORE = 1.0
+
 
 # -----------------------------------------------------------------------------
 # Document Generator Theme & Styles
@@ -121,10 +129,16 @@ VISUAL_TRIGGERS = [
 ]
 
 MATH_CODE_TRIGGERS = [
-    "simulate", "python", "code", "plot", "math",
-    "calculus", "formula", "lmtd", "differentiate",
-    "integral", "sympy", "solve", "heat exchanger"
+    "simulate", "simulation", "python", "code", "coding", "plot", "plotting",
+    "math", "mathematics", "calculate", "calculation", "compute", "computation",
+    "sum", "summation", "calculus", "formula", "lmtd", "differentiate",
+    "integral", "integration", "sympy", "numpy", "solve", "equation", "arithmetic",
+    "heat exchanger", "draw", "drawing", "graph", "chart", "diagram", "line",
+    "curve", "visualize", "algorithm", "script", "evaluate", "derive", "numbers",
+    "fibonacci", "factorial", "matrix", "loop"
 ]
+
+
 
 STANDARDS_TRIGGERS = [
     "api", "asme", "gfr", "standard", "code",

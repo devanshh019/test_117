@@ -4,12 +4,11 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 
 from .config import (
-    SOVEREIGN_ORGANIZATION,
-    SECURITY_CLASSIFICATION,
-    AIR_GAP_ENFORCED,
+    APP_NAME,
     HOST,
     PORT,
 )
+
 
 
 class AirGapSentinel:
@@ -80,7 +79,7 @@ class AirGapSentinel:
         uptime = int((datetime.now(timezone.utc) - self.start_time).total_seconds())
 
         return {
-            "air_gap_enforced": AIR_GAP_ENFORCED,
+            "air_gap_enforced": True,
             "status": "SECURE // 100% AIR-GAPPED",
             "uptime_seconds": uptime,
             "outbound_egress_bytes": self.outbound_egress_bytes,
@@ -103,8 +102,8 @@ class AirGapSentinel:
 
         return {
             "certificate_id": cert_id,
-            "organization": SOVEREIGN_ORGANIZATION,
-            "security_classification": SECURITY_CLASSIFICATION,
+            "organization": APP_NAME,
+            "security_classification": "CONFIDENTIAL",
             "standard_compliance": ["AIR-GAP-LVL-4", "ISO/IEC 27001 A.13", "NIST SP 800-53 SC-7"],
             "issued_at": current_time,
             "air_gap_verified": True,
@@ -115,6 +114,7 @@ class AirGapSentinel:
             "chain_head_hash": self.audit_chain_hash,
             "auditor_signature": "KAVACH_SENTINEL_SHA256_VERIFIED",
         }
+
 
 
 # Shared sentinel instance

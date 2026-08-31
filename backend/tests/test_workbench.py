@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from backend.router import router
-from backend.registry import registry
+from backend.model_manager import load_models, save_model, get_model_for_task
 from backend.sandbox_executor import sandbox
 from backend.document_generator import doc_generator
 from backend.multimodal_vision import vision_engine
@@ -12,16 +12,22 @@ from backend.network_guard import sentinel
 from backend.engine import agent_engine
 
 
+
 class TestSovereignWorkbench(unittest.TestCase):
 
-    def test_01_router_single_model_classification(self):
-        """Verify dynamic router classifies tasks and routes to the active single model"""
+    def test_01_router_multi_model_auto_selection(self):
+        """Verify dynamic router classifies tasks and auto-selects specialized models"""
         res_code = router.route_task("Write a python script to simulate heat exchanger LMTD and calculate heat duty")
         self.assertEqual(res_code.task_category, "ENGINEERING_MATH_AND_CODE")
-        self.assertEqual(res_code.selected_model_id, registry.get_active_model().model_id)
+        expected_math_model = get_model_for_task("ENGINEERING_MATH_AND_CODE").get("id")
+        self.assertEqual(res_code.selected_model_id, expected_math_model)
 
         res_doc = router.route_task("Generate a Word document approval note and PowerPoint presentation deck")
         self.assertEqual(res_doc.task_category, "ENTERPRISE_DELIVERABLE_SYNTHESIS")
+        expected_doc_model = get_model_for_task("ENTERPRISE_DELIVERABLE_SYNTHESIS").get("id")
+        self.assertEqual(res_doc.selected_model_id, expected_doc_model)
+
+
 
     def test_02_sandbox_code_execution(self):
         """Verify isolated Python sandbox execution and Matplotlib artifact generation"""

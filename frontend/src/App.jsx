@@ -463,8 +463,9 @@ function DeliverableInspector({ artifact, onClose, onZoomImage }) {
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [selectedDeliverable, setSelectedDeliverable] = useState(null);
+
   const [expandedImage, setExpandedImage] = useState(null);
 
   const [prompt, setPrompt] = useState('');
@@ -528,6 +529,14 @@ export default function App() {
   const [securityData, setSecurityData] = useState(null);
   const [certificate, setCertificate] = useState(null);
   const [models, setModels] = useState([]);
+  const [modelRegistryTab, setModelRegistryTab] = useState('list'); // 'list' or 'register'
+  const [newModelId, setNewModelId] = useState('');
+  const [newModelName, setNewModelName] = useState('');
+  const [newModelCapabilities, setNewModelCapabilities] = useState(['ENGINEERING_MATH_AND_CODE']);
+  const [newModelDefault, setNewModelDefault] = useState(false);
+  const [isRegisteringModel, setIsRegisteringModel] = useState(false);
+  const [modelRegisterSuccess, setModelRegisterSuccess] = useState('');
+
 
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -593,8 +602,15 @@ export default function App() {
     } catch (e) {}
   };
 
-  const handleSelectModel = async (modelId) => {
+  const handleSelectModel = async (modelId, modelName) => {
     try {
+      if (modelName) {
+        setHealthData(prev => prev ? {
+          ...prev,
+          active_model_id: modelId,
+          active_foundation_model: modelName
+        } : prev);
+      }
       const res = await fetch('/api/models/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -602,9 +618,53 @@ export default function App() {
       });
       if (res.ok) {
         await fetchHealth();
+        await fetchModels();
       }
     } catch (e) {}
   };
+
+
+  const handleRegisterModel = async (e) => {
+    if (e) e.preventDefault();
+    if (!newModelId.trim()) return;
+    setIsRegisteringModel(true);
+    setModelRegisterSuccess('');
+    try {
+      const res = await fetch('/api/models/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: newModelId.trim(),
+          name: newModelName.trim() || newModelId.trim(),
+          capabilities: newModelCapabilities,
+          default: newModelDefault,
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setModels(data.models || []);
+        setModelRegisterSuccess(`Saved ${newModelId.trim()} to model.yaml`);
+        setNewModelId('');
+        setNewModelName('');
+        setNewModelCapabilities(['ENGINEERING_MATH_AND_CODE']);
+        setNewModelDefault(false);
+        await fetchHealth();
+        await fetchModels();
+        setTimeout(() => setModelRegisterSuccess(''), 4000);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsRegisteringModel(false);
+    }
+  };
+
+  const toggleCapability = (cap) => {
+    setNewModelCapabilities(prev =>
+      prev.includes(cap) ? prev.filter(c => c !== cap) : [...prev, cap]
+    );
+  };
+
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files || []);
@@ -775,10 +835,11 @@ export default function App() {
     const userMsg = {
       id: Date.now(),
       role: 'user',
-      content: query || (uploadedAttachments.length > 0 ? `Uploaded ${uploadedAttachments.length} file(s): ${uploadedAttachments.map(a => a.filename).join(', ')}` : ''),
+      content: query || '',
       attachments: uploadedAttachments,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
+
 
     const isFirstMsg = messages.length === 0;
     const newTitle = isFirstMsg ? (query.length > 28 ? query.slice(0, 28) + '...' : (query || uploadedAttachments[0]?.filename || 'File Task')) : currentSession.title;
@@ -794,43 +855,34 @@ export default function App() {
       return s;
     }));
 
-    // Dynamically classify the ACTUAL task intent for live inspection
-    const promptLower = query.toLowerCase();
-    let taskType = "Neural Reasoning & Response Synthesis";
-    let targetAction = "Querying local model on localhost (127.0.0.1:11434)...";
+    // 1. Instantly check the router decision (<2ms) to immediately update UI header & status
+    let predictedModel = healthData?.active_foundation_model || healthData?.active_model_id || "Local Model";
+    let predictedCategory = "GENERAL_ENGINEERING_REASONING";
 
-    if (uploadedAttachments.length > 0) {
-      taskType = "Multimodal Document & Attachment Processing";
-      targetAction = `Processing ${uploadedAttachments.length} attachment(s) with local foundation model`;
-    } else if (promptLower.includes("powerpoint") || promptLower.includes("ppt") || promptLower.includes("slide") || promptLower.includes("deck") || promptLower.includes("presentation")) {
-      taskType = "PowerPoint Presentation Generation";
-      targetAction = "Structuring slide outline & generating .pptx deck";
-    } else if (promptLower.includes("word") || promptLower.includes("docx") || promptLower.includes("report") || promptLower.includes("approval note")) {
-      taskType = "Word Document Compilation";
-      targetAction = "Drafting executive note & compiling .docx deliverable";
-    } else if (promptLower.includes("excel") || promptLower.includes("xlsx") || promptLower.includes("spreadsheet") || promptLower.includes("workbook")) {
-      taskType = "Excel Spreadsheet Calculation";
-      targetAction = "Building spreadsheet formulas & compiling .xlsx file";
-    } else if (promptLower.includes("differentiate") || promptLower.includes("integral") || promptLower.includes("calculus") || promptLower.includes("sympy") || promptLower.includes("solve")) {
-      taskType = "Mathematical Sandbox Evaluation";
-      targetAction = "Evaluating calculus with local Python SymPy engine in sandbox";
-    } else if (promptLower.includes("simulate") || promptLower.includes("heat exchanger") || promptLower.includes("lmtd")) {
-      taskType = "Thermal Process Simulation";
-      targetAction = "Simulating LMTD equations & generating matplotlib thermal plot";
-    } else if (promptLower.includes("p&id") || promptLower.includes("drawing") || promptLower.includes("schematic")) {
-      taskType = "P&ID Schematic Vision Inspection";
-      targetAction = "Analyzing coordinates & auditing safety interlocks";
-    } else if (promptLower.includes("api") || promptLower.includes("asme") || promptLower.includes("standard") || promptLower.includes("gfr")) {
-      taskType = "Plant Standards Local Search";
-      targetAction = "Searching local RAG knowledge base & standards";
-    }
-
-    const activeModelName = healthData?.active_foundation_model || healthData?.active_model_id || "Local Model";
+    try {
+      const routeRes = await fetch('/api/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: query, attachments: uploadedAttachments })
+      });
+      if (routeRes.ok) {
+        const routeData = await routeRes.json();
+        if (routeData.model_name) predictedModel = routeData.model_name;
+        if (routeData.task_category) predictedCategory = routeData.task_category;
+        
+        // Immediately show the auto-selected model in the Top Header!
+        setHealthData(prev => prev ? {
+          ...prev,
+          active_foundation_model: predictedModel,
+          active_model_id: routeData.selected_model_id || prev.active_model_id
+        } : prev);
+      }
+    } catch (e) {}
 
     setActiveTaskMeta({
-      taskType,
-      targetAction,
-      model: activeModelName,
+      taskType: predictedCategory,
+      targetAction: `Executing task with ${predictedModel}`,
+      model: predictedModel,
       endpoint: "http://127.0.0.1:11434",
       networkEgress: "0 Bytes (Air-Gapped)"
     });
@@ -847,6 +899,7 @@ export default function App() {
       role: m.role,
       content: m.content
     }));
+
 
     fetch('/api/agent/execute', {
       method: 'POST',
@@ -877,6 +930,15 @@ export default function App() {
           setSelectedDeliverable(data.artifacts[0]);
           setRightPanelOpen(true);
         }
+
+        if (data.routing && data.routing.model_name) {
+          setHealthData(prev => prev ? {
+            ...prev,
+            active_foundation_model: data.routing.model_name,
+            active_model_id: data.routing.selected_model_id || prev.active_model_id,
+          } : prev);
+        }
+
 
         setSessions(prev => prev.map(s => {
           if (s.id === targetSessionId) {
@@ -1044,34 +1106,9 @@ export default function App() {
               })}
             </div>
 
-            {/* LOWER SECTION: STANDARD WORKFLOWS & TOOLS */}
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1 scrollbar-none">
-              {/* Standard Workflows */}
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-[#78716c] px-1 mb-1.5 font-bold">
-                  Standard Workflows
-                </div>
-                <div className="space-y-1">
-                  {scenarios.map((sc) => (
-                    <button
-                      key={sc.id}
-                      onClick={() => handleSend(sc.prompt)}
-                      disabled={loading}
-                      className="w-full text-left p-2 rounded-lg text-xs hover:bg-[#ede7dc] text-[#44403c] hover:text-[#1c1917] transition-colors group flex items-start space-x-2 border border-transparent hover:border-[#d6cebf]"
-                    >
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#ea580c] mt-1.5 shrink-0 group-hover:scale-125 transition-transform" />
-                      <div className="flex-1 truncate">
-                        <div className="font-medium text-[#1c1917] truncate group-hover:text-[#ea580c] transition-colors text-[11px]">
-                          {sc.title}
-                        </div>
-                        <div className="text-[9px] text-[#78716c] truncate">
-                          {sc.badge}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+            {/* LOWER SECTION: INTEGRITY & GOVERNANCE TOOLS */}
+            <div className="space-y-3 pt-2 border-t border-[#e5ded1]">
+
 
               {/* Integrity & Tools */}
               <div>
@@ -1168,23 +1205,29 @@ export default function App() {
               </button>
             )}
 
-            <div className="flex items-center space-x-2">
-              <span className="text-xs font-semibold tracking-wide text-[#1c1917] uppercase">
-                {healthData?.active_foundation_model || 'Local Sovereign Assistant'}
-              </span>
+            <div className="flex items-center space-x-2.5">
+              <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-[#ffffff] border border-[#d6cebf] shadow-2xs">
+                <Cpu className="w-3.5 h-3.5 text-[#ea580c]" />
+                <span className="text-[10px] font-bold text-[#78716c] uppercase">ACTIVE MODEL:</span>
+                <span className="text-[11px] font-bold text-[#1c1917] font-mono truncate max-w-[220px]">
+                  {healthData?.active_foundation_model || healthData?.active_model_id || 'Gemma 3 4B'}
+                </span>
+              </div>
               <button
                 onClick={() => setActiveModal('models')}
-                className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors flex items-center space-x-1 ${
+                className={`text-[10px] font-mono px-2 py-1 rounded-lg border transition-colors flex items-center space-x-1 ${
                   healthData?.ollama_backend?.available
                     ? 'bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0] hover:bg-[#dcfce7]'
                     : 'bg-[#fff7ed] text-[#ea580c] border-[#fed7aa] hover:bg-[#ffedd5]'
                 }`}
-                title="Click to view model settings"
+                title="Click to view model settings & registry"
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${healthData?.ollama_backend?.available ? 'bg-[#16a34a]' : 'bg-[#ea580c]'}`} />
-                <span>{healthData?.ollama_backend?.available ? (healthData.ollama_backend.active_model || 'Ollama Connected') : 'Ollama Offline'}</span>
+                <span className={`w-1.5 h-1.5 rounded-full ${healthData?.ollama_backend?.available ? 'bg-[#16a34a] animate-pulse' : 'bg-[#ea580c]'}`} />
+                <span>{healthData?.ollama_backend?.available ? 'Ollama Online' : 'Offline'}</span>
               </button>
             </div>
+
+
           </div>
 
 
@@ -1287,22 +1330,74 @@ export default function App() {
                         : 'bg-[#ffffff] border border-[#e5ded1] text-[#1c1917] rounded-2xl rounded-tl-sm p-5 shadow-sm space-y-3 text-xs leading-relaxed'
                     }`}
                   >
-                    {/* Assistant Meta */}
+                    {/* Assistant Meta - Prominent Model Auto-Selection Badge */}
                     {msg.role === 'assistant' && msg.routing && (
-                      <div className="flex items-center justify-between pb-2 border-b border-[#f0eae0] text-[11px] font-mono text-[#78716c]">
+                      <div className="flex flex-wrap items-center justify-between pb-2.5 mb-1 border-b border-[#f0eae0] text-[11px] font-mono gap-2">
                         <div className="flex items-center space-x-2">
-                          <span className="text-[#ea580c] font-semibold">
-                            {msg.routing.model_name}
+                          <span className="px-2 py-0.5 rounded bg-[#fff7ed] text-[#ea580c] border border-[#fed7aa] font-bold text-[10px] flex items-center space-x-1 shadow-2xs">
+                            <Cpu className="w-3 h-3" />
+                            <span>MODEL: {msg.routing.model_name}</span>
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-[#f4efe6] text-[#78716c] border border-[#e5ded1] text-[10px] font-semibold">
+                            {msg.routing.task_category}
                           </span>
                         </div>
                         {msg.elapsed_seconds && (
-                          <span>Executed in {msg.elapsed_seconds}s</span>
+                          <span className="text-[10px] text-[#78716c] bg-[#faf8f5] px-2 py-0.5 rounded border border-[#e5ded1]">
+                            Executed in {msg.elapsed_seconds}s
+                          </span>
                         )}
                       </div>
                     )}
 
+
+                    {/* User Uploaded Attachments (Photos & Documents) */}
+                    {msg.role === 'user' && msg.attachments && msg.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pb-1">
+                        {msg.attachments.map((att, aIdx) => {
+                          const isImg =
+                            (att.file_type && ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(att.file_type.toLowerCase())) ||
+                            (att.filename && att.filename.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i));
+                          return isImg ? (
+                            <div
+                              key={aIdx}
+                              onClick={() => setExpandedImage(att.path)}
+                              className="group relative cursor-pointer rounded-xl border border-[#d6cebf] bg-[#ffffff] p-1.5 shadow-xs hover:border-[#ea580c] transition-all max-w-[200px]"
+                              title="Click to inspect full image"
+                            >
+                              <img
+                                src={att.path}
+                                alt={att.filename}
+                                className="rounded-lg max-h-40 w-auto object-contain bg-[#faf8f5]"
+                              />
+                              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-center justify-center text-white">
+                                <Eye className="w-4 h-4" />
+                              </div>
+                              <div className="text-[10px] font-mono text-[#78716c] truncate px-1 pt-1">
+                                {att.filename}
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              key={aIdx}
+                              className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-[#ffffff] border border-[#d6cebf] shadow-xs text-xs font-mono text-[#1c1917]"
+                            >
+                              <FileText className="w-4 h-4 text-[#ea580c] shrink-0" />
+                              <div className="truncate max-w-[180px]">
+                                <div className="font-semibold truncate">{att.filename}</div>
+                                <div className="text-[9px] text-[#78716c]">
+                                  {att.size_bytes ? `${Math.round(att.size_bytes / 1024)} KB` : 'Document'}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     {/* Message content */}
-                    <FormattedMarkdown content={msg.content} />
+                    {msg.content && <FormattedMarkdown content={msg.content} />}
+
 
                     {/* Sandbox execution result */}
                     {msg.sandbox_output && (
@@ -1515,14 +1610,17 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setThinkingExpanded(!thinkingExpanded)}
-                  className="inline-flex items-center space-x-2 py-1 px-3 rounded-full bg-[#f4efe6] hover:bg-[#ede7dc] border border-[#e5ded1] text-[11px] font-mono text-[#1c1917] w-fit shadow-xs transition-all cursor-pointer group"
+                  className="inline-flex items-center space-x-2 py-1 px-3 rounded-full bg-[#fff7ed] hover:bg-[#ffedd5] border border-[#fed7aa] text-[11px] font-mono text-[#1c1917] w-fit shadow-xs transition-all cursor-pointer group"
                 >
-                  <span className="font-semibold text-[#ea580c]">Thinking</span>
-                  <span className="text-[#a8a29e]">•</span>
-                  <span className="text-[#1c1917] font-semibold text-[10px]">{elapsedTimer}s</span>
-                  <span className="text-[#a8a29e]">•</span>
+                  <Cpu className="w-3.5 h-3.5 text-[#ea580c] animate-pulse" />
+                  <span className="font-bold text-[#ea580c]">
+                    Routed: {activeTaskMeta?.model || 'Classifying...'}
+                  </span>
+                  <span className="text-[#fed7aa]">•</span>
+                  <span className="text-[#9a3412] font-semibold text-[10px]">{elapsedTimer}s</span>
+                  <span className="text-[#fed7aa]">•</span>
                   <span className="text-[#78716c] group-hover:text-[#1c1917] text-[10px]">
-                    {thinkingExpanded ? "Hide details" : "Inspect process"}
+                    {thinkingExpanded ? "Hide details" : "Inspect trace"}
                   </span>
                   {thinkingExpanded ? (
                     <ChevronDown className="w-3 h-3 text-[#78716c] group-hover:text-[#ea580c] transition-colors" />
@@ -1530,6 +1628,7 @@ export default function App() {
                     <ChevronRight className="w-3 h-3 text-[#78716c] group-hover:text-[#ea580c] transition-colors" />
                   )}
                 </button>
+
 
                 {/* Expanded telemetry */}
                 {thinkingExpanded && activeTaskMeta && (
@@ -1656,10 +1755,19 @@ export default function App() {
                 type="text"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if ((prompt.trim() || attachedFiles.length > 0) && !loading) {
+                      handleSend();
+                    }
+                  }
+                }}
                 placeholder={attachedFiles.length > 0 ? "Ask about attached file(s) or leave empty for analysis..." : `Ask ${healthData?.active_foundation_model || 'Local Model'} (e.g. 'Draft API 510 Turnaround Note' or 'Simulate heat exchanger')...`}
                 disabled={loading}
                 className="flex-1 bg-transparent px-2.5 py-1.5 text-xs text-[#1c1917] placeholder-[#a8a29e] focus:outline-none font-sans"
               />
+
 
               <button
                 type="button"
@@ -2009,14 +2117,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Model Settings Modal */}
+      {/* Model Registry & Configuration Modal (model.yaml) */}
       {activeModal === 'models' && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-[#ffffff] border border-[#d6cebf] rounded-xl max-w-xl w-full p-6 shadow-xl space-y-4 text-xs font-mono text-[#1c1917]">
-            <div className="flex items-center justify-between border-b border-[#e5ded1] pb-3">
+          <div className="bg-[#ffffff] border border-[#d6cebf] rounded-xl max-w-2xl w-full p-6 shadow-xl space-y-4 text-xs font-mono text-[#1c1917] max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-[#e5ded1] pb-3 shrink-0">
               <div className="flex items-center space-x-2 font-bold text-[#1c1917]">
                 <Cpu className="w-4 h-4 text-[#ea580c]" />
-                <span>LOCAL SOVEREIGN FOUNDATION MODEL</span>
+                <span>MODEL REGISTRY & CAPABILITIES (model.yaml)</span>
               </div>
               <button
                 onClick={() => setActiveModal(null)}
@@ -2026,69 +2134,278 @@ export default function App() {
               </button>
             </div>
 
-            {/* Live Ollama Connectivity Card */}
-            <div className="p-4 rounded-xl bg-[#faf8f5] border border-[#e5ded1] space-y-2.5 font-sans">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${healthData?.ollama_backend?.available ? 'bg-[#16a34a] animate-pulse' : 'bg-[#ea580c]'}`} />
-                  <span className="font-semibold text-xs">
-                    {healthData?.ollama_backend?.available ? 'Ollama Daemon Connected' : 'Ollama Daemon Offline'}
-                  </span>
-                </div>
-                <span className="text-[10px] font-mono text-[#78716c]">
-                  {healthData?.ollama_backend?.endpoint || 'http://127.0.0.1:11434'}
-                </span>
-              </div>
-
-              <div className="text-[11px] text-[#57534e]">
-                Active Model: <strong className="text-[#1c1917]">{healthData?.active_foundation_model || healthData?.active_model_id || 'Auto-Detected'}</strong> (~3.4 GB RAM allocation)
-              </div>
-
-              {healthData?.ollama_backend?.models && healthData.ollama_backend.models.length > 0 ? (
-                <div className="space-y-1.5 pt-2 border-t border-[#e5ded1]">
-                  <div className="text-[10px] uppercase font-bold text-[#78716c] font-mono">Installed Ollama Models:</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {healthData.ollama_backend.models.map((mTag) => (
-                      <button
-                        key={mTag}
-                        onClick={() => handleSelectModel(mTag)}
-                        className={`px-2.5 py-1 rounded-md text-[11px] font-mono transition-all ${
-                          (healthData.active_model_id === mTag || healthData.active_foundation_model === mTag)
-                            ? 'bg-[#ea580c] text-white font-bold shadow-xs'
-                            : 'bg-[#ffffff] text-[#44403c] border border-[#d6cebf] hover:border-[#ea580c]'
-                        }`}
-                      >
-                        {mTag}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3 rounded-lg bg-[#fff7ed] border border-[#fed7aa] text-[11px] text-[#9a3412] space-y-1">
-                  <div className="font-bold flex items-center space-x-1">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Ollama Connection Notice</span>
-                  </div>
-                  <p>Start your local model in terminal:</p>
-                  <code className="block p-1.5 rounded bg-[#ffffff] font-mono text-[10px] text-[#ea580c] border border-[#fed7aa]">
-                    ollama run llama3 &nbsp;# or: ollama run gemma3:4b
-                  </code>
-                </div>
-              )}
+            {/* Navigation Tabs */}
+            <div className="flex border-b border-[#e5ded1] gap-4 shrink-0 font-sans">
+              <button
+                onClick={() => setModelRegistryTab('list')}
+                className={`pb-2 text-xs font-semibold transition-colors flex items-center space-x-1.5 ${
+                  modelRegistryTab === 'list'
+                    ? 'border-b-2 border-[#ea580c] text-[#ea580c]'
+                    : 'text-[#78716c] hover:text-[#1c1917]'
+                }`}
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>Configured Models ({models.length || 1})</span>
+              </button>
+              <button
+                onClick={() => setModelRegistryTab('register')}
+                className={`pb-2 text-xs font-semibold transition-colors flex items-center space-x-1.5 ${
+                  modelRegistryTab === 'register'
+                    ? 'border-b-2 border-[#ea580c] text-[#ea580c]'
+                    : 'text-[#78716c] hover:text-[#1c1917]'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Register Model to YAML</span>
+              </button>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-[#e5ded1]">
-              <button
-                onClick={fetchHealth}
-                className="px-3 py-1.5 rounded-lg bg-[#faf8f5] hover:bg-[#ede7dc] text-[#1c1917] font-semibold flex items-center space-x-1.5 border border-[#d6cebf] text-xs transition-colors"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-[#ea580c]" />
-                <span>Refresh Connection</span>
-              </button>
+            {/* Content Body */}
+            <div className="overflow-y-auto flex-1 space-y-4 pr-1">
+              {modelRegisterSuccess && (
+                <div className="p-3 rounded-lg bg-[#f0fdf4] border border-[#bbf7d0] text-[#16a34a] flex items-center space-x-2 font-sans text-xs">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{modelRegisterSuccess}</span>
+                </div>
+              )}
+
+              {modelRegistryTab === 'list' ? (
+                <div className="space-y-3 font-sans">
+                  {/* Active Daemon Status Card */}
+                  <div className="p-3.5 rounded-xl bg-[#faf8f5] border border-[#e5ded1] flex items-center justify-between text-xs">
+                    <div className="flex items-center space-x-2.5">
+                      <span className={`w-2.5 h-2.5 rounded-full ${healthData?.ollama_backend?.available ? 'bg-[#16a34a] animate-pulse' : 'bg-[#ea580c]'}`} />
+                      <div>
+                        <div className="font-semibold text-[#1c1917]">
+                          {healthData?.ollama_backend?.available ? 'Ollama Daemon Active' : 'Ollama Daemon Offline'}
+                        </div>
+                        <div className="text-[11px] text-[#78716c] font-mono">
+                          Active Model: <strong className="text-[#ea580c]">{healthData?.active_foundation_model || healthData?.active_model_id || 'gemma3:4b'}</strong>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => { fetchHealth(); fetchModels(); }}
+                      className="px-2.5 py-1 rounded bg-[#ffffff] border border-[#d6cebf] hover:bg-[#f4efe6] text-[11px] font-mono flex items-center space-x-1 text-[#44403c]"
+                      title="Refresh models list"
+                    >
+                      <RefreshCw className="w-3 h-3 text-[#ea580c]" />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+
+                  {/* Configured Models Cards */}
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-bold text-[#78716c] uppercase tracking-wider font-mono">
+                      Models in model.yaml:
+                    </div>
+                    {models && models.length > 0 ? (
+                      models.map((m) => {
+                        const mId = m.id || m.model_id;
+                        const isCurrentActive = healthData?.active_model_id === mId || healthData?.active_foundation_model === mId;
+                        return (
+                          <div
+                            key={mId}
+                            className={`p-3.5 rounded-xl border transition-all space-y-2 ${
+                              isCurrentActive
+                                ? 'bg-[#fff7ed]/50 border-[#ea580c] shadow-xs'
+                                : 'bg-[#ffffff] border-[#e5ded1] hover:border-[#d6cebf]'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <div className="font-bold text-xs text-[#1c1917]">{m.name || mId}</div>
+                                <code className="px-1.5 py-0.5 rounded bg-[#f4efe6] text-[#78716c] text-[10px] font-mono border border-[#e5ded1]">
+                                  {mId}
+                                </code>
+                                {m.default && (
+                                  <span className="px-1.5 py-0.5 rounded bg-[#f0fdf4] text-[#16a34a] text-[10px] font-mono font-bold border border-[#bbf7d0]">
+                                    DEFAULT
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleSelectModel(mId)}
+                                className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${
+                                  isCurrentActive
+                                    ? 'bg-[#ea580c] text-white font-bold'
+                                    : 'bg-[#faf8f5] hover:bg-[#ede7dc] text-[#44403c] border border-[#d6cebf]'
+                                }`}
+                              >
+                                {isCurrentActive ? 'Active' : 'Select'}
+                              </button>
+                            </div>
+
+                            {/* Capabilities Badges */}
+                            {m.capabilities && m.capabilities.length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {m.capabilities.map((cap) => (
+                                  <span
+                                    key={cap}
+                                    className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#f4efe6] text-[#44403c] border border-[#e5ded1]"
+                                  >
+                                    {cap}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="p-4 text-center text-[#78716c] text-xs bg-[#faf8f5] rounded-xl border border-[#e5ded1]">
+                        No models loaded from model.yaml.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Installed Ollama Tags */}
+                  {healthData?.ollama_backend?.models && healthData.ollama_backend.models.length > 0 && (
+                    <div className="p-3 bg-[#faf8f5] rounded-xl border border-[#e5ded1] space-y-1.5 font-sans">
+                      <div className="text-[10px] font-mono uppercase font-bold text-[#78716c]">
+                        Detected in Local Ollama (/api/tags):
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {healthData.ollama_backend.models.map((tag) => (
+                          <button
+                            key={tag}
+                            onClick={() => handleSelectModel(tag)}
+                            className="px-2 py-0.5 rounded text-[11px] font-mono bg-[#ffffff] hover:border-[#ea580c] border border-[#d6cebf] text-[#44403c] transition-colors"
+                          >
+                            {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Registration Form Tab */
+                <form onSubmit={handleRegisterModel} className="space-y-4 font-sans text-xs">
+                  {/* Quick-fill from Ollama */}
+                  {healthData?.ollama_backend?.models && healthData.ollama_backend.models.length > 0 && (
+                    <div className="p-3 bg-[#faf8f5] rounded-xl border border-[#e5ded1] space-y-1.5">
+                      <div className="text-[10px] font-mono uppercase font-bold text-[#78716c]">
+                        Quick Fill from Installed Ollama Models:
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {healthData.ollama_backend.models.map((tag) => (
+                          <button
+                            type="button"
+                            key={tag}
+                            onClick={() => {
+                              setNewModelId(tag);
+                              if (!newModelName) setNewModelName(tag.charAt(0).toUpperCase() + tag.slice(1).replace(':', ' '));
+                            }}
+                            className="px-2 py-0.5 rounded text-[11px] font-mono bg-[#ffffff] hover:border-[#ea580c] hover:text-[#ea580c] border border-[#d6cebf] text-[#44403c] transition-colors"
+                          >
+                            + {tag}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-[#1c1917] block">
+                      Model ID / Tag <span className="text-[#ea580c]">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. deepseek-r1:8b, mistral:7b, llama3:8b"
+                      value={newModelId}
+                      onChange={(e) => setNewModelId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-[#faf8f5] border border-[#d6cebf] font-mono text-xs text-[#1c1917] focus:outline-none focus:border-[#ea580c]"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-[#1c1917] block">
+                      Display Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. DeepSeek R1 Math Specialist"
+                      value={newModelName}
+                      onChange={(e) => setNewModelName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-[#faf8f5] border border-[#d6cebf] text-xs text-[#1c1917] focus:outline-none focus:border-[#ea580c]"
+                    />
+                  </div>
+
+                  {/* Capabilities Multi-Select Checkboxes */}
+                  <div className="space-y-2">
+                    <label className="font-semibold text-[#1c1917] block">
+                      Assign Task Capabilities (For Intent Router Auto-Selection):
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {[
+                        { id: 'ENGINEERING_MATH_AND_CODE', label: 'Math & Python Code Simulation' },
+                        { id: 'STANDARDS_AND_GOVERNANCE_REASONING', label: 'Plant Standards (API/ASME/GFR)' },
+                        { id: 'ENTERPRISE_DELIVERABLE_SYNTHESIS', label: 'Word / Excel / PPT Deliverables' },
+                        { id: 'MULTIMODAL_IMAGE_INSPECTION', label: 'Multimodal Vision & P&ID Scans' },
+                        { id: 'DOCUMENT_RAG_ANALYSIS', label: 'Knowledge Base Document Search' },
+                        { id: 'GENERAL_ENGINEERING_REASONING', label: 'General Technical Reasoning' },
+                      ].map((item) => (
+                        <label
+                          key={item.id}
+                          className={`flex items-center space-x-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                            newModelCapabilities.includes(item.id)
+                              ? 'bg-[#fff7ed] border-[#fed7aa] text-[#9a3412]'
+                              : 'bg-[#faf8f5] border-[#e5ded1] text-[#44403c] hover:border-[#d6cebf]'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={newModelCapabilities.includes(item.id)}
+                            onChange={() => toggleCapability(item.id)}
+                            className="rounded text-[#ea580c] focus:ring-[#ea580c]"
+                          />
+                          <span className="text-[11px] font-medium leading-tight">{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="defaultCheckbox"
+                      checked={newModelDefault}
+                      onChange={(e) => setNewModelDefault(e.target.checked)}
+                      className="rounded text-[#ea580c] focus:ring-[#ea580c]"
+                    />
+                    <label htmlFor="defaultCheckbox" className="text-xs text-[#44403c] cursor-pointer">
+                      Set as Default Model in <code className="font-mono text-[#ea580c]">model.yaml</code>
+                    </label>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isRegisteringModel || !newModelId.trim()}
+                      className="px-4 py-2 rounded-lg bg-[#ea580c] hover:bg-[#c2410c] text-white font-semibold text-xs flex items-center space-x-1.5 shadow-xs transition-colors disabled:opacity-50"
+                    >
+                      {isRegisteringModel ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving to YAML...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Save Model to model.yaml</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         </div>
       )}
+
 
       {/* Full-Screen Image / Plot Lightbox Modal */}
       {expandedImage && (

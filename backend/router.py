@@ -8,7 +8,7 @@ from .config import (
     MATH_CODE_TRIGGERS,
     STANDARDS_TRIGGERS,
 )
-from .registry import registry
+from .model_manager import get_model_for_task
 
 
 class RoutingDecision(BaseModel):
@@ -17,15 +17,10 @@ class RoutingDecision(BaseModel):
     model_name: str
     confidence: float
     routing_reasons: List[str]
-    estimated_ram_usage_gb: float
-    specialized_features: List[str]
 
 
 class DynamicTaskRouter:
-    """Classifies user intent and routes tasks to the active local model."""
-
-    def __init__(self):
-        self.registry = registry
+    """Classifies user intent and routes tasks to the specialized model in model.yaml."""
 
     def _has_image_attachment(self, attachments: List[Dict[str, Any]]) -> bool:
         return any(
@@ -61,7 +56,6 @@ class DynamicTaskRouter:
         attachments: List[Dict[str, Any]] = None,
         requested_mode: Optional[str] = None,
     ) -> RoutingDecision:
-        active_model = self.registry.get_active_model()
         prompt_lower = prompt.lower()
         attachments = attachments or []
 
@@ -69,20 +63,20 @@ class DynamicTaskRouter:
         has_doc = self._has_doc_attachment(attachments)
         category, reason = self._determine_category(prompt_lower, has_image, has_doc)
 
-        reasons = [reason, f"Dispatched to {active_model.name}"]
+        # Auto-select the specialized model for this specific task category from model.yaml
+        target_model = get_model_for_task(category)
+        model_id = target_model.get("id", "gemma3:4b")
+        model_name = target_model.get("name", model_id)
+        reasons = [reason, f"Auto-selected specialized model: {model_name}"]
 
         return RoutingDecision(
             task_category=category,
-            selected_model_id=active_model.model_id,
-            model_name=active_model.name,
+            selected_model_id=model_id,
+            model_name=model_name,
             confidence=0.98,
             routing_reasons=reasons,
-            estimated_ram_usage_gb=active_model.vram_footprint_gb,
-            specialized_features=active_model.capabilities,
         )
 
 
 # Default shared router instance
 router = DynamicTaskRouter()
-
-

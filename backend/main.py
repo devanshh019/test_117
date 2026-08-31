@@ -9,19 +9,20 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .config import (
-    STORAGE_DIR,
-    UPLOADS_DIR,
-    TEMP_UPLOADS_DIR,
-    SOVEREIGN_ORGANIZATION,
-    SECURITY_CLASSIFICATION,
+    APP_NAME,
     APP_TITLE,
     APP_VERSION,
     HOST,
     PORT,
+    STORAGE_DIR,
+    UPLOADS_DIR,
+    KB_DOCS_DIR,
     FRONTEND_DIST_DIR,
 )
+
+
 from .network_guard import sentinel
-from .registry import registry, ModelProfile
+from .model_manager import load_models, save_model, get_active_model, set_active_model
 from .router import router
 from .inference import inference_engine
 from .engine import agent_engine
@@ -63,6 +64,13 @@ class SelectModelRequest(BaseModel):
     model_id: str
 
 
+class RegisterModelRequest(BaseModel):
+    id: str
+    name: Optional[str] = None
+    capabilities: Optional[List[str]] = []
+    default: Optional[bool] = False
+
+
 class KBSearchRequest(BaseModel):
     query: str
     top_k: int = 3
@@ -75,15 +83,14 @@ class KBSearchRequest(BaseModel):
 def get_health():
     """Returns local system health, air-gap status, and Ollama connectivity."""
     ollama_info = inference_engine.check_local_ollama_health()
-    active_profile = registry.get_active_model()
+    active = get_active_model()
     return {
         "status": "HEALTHY",
         "air_gap_verified": True,
-        "organization": SOVEREIGN_ORGANIZATION,
-        "security_classification": SECURITY_CLASSIFICATION,
-        "active_foundation_model": active_profile.name,
-        "active_model_id": active_profile.model_id,
-        "ram_allocated_gb": registry.get_total_vram_usage(),
+        "organization": APP_NAME,
+        "security_classification": "CONFIDENTIAL",
+        "active_foundation_model": active.get("name", "Gemma 3 4B"),
+        "active_model_id": active.get("id", "gemma3:4b"),
         "ollama_backend": ollama_info,
         "engine_mode": "SOVEREIGN_AIR_GAPPED_LOCAL",
     }
@@ -91,14 +98,37 @@ def get_health():
 
 @app.get("/api/models")
 def list_models():
-    """Lists local models detected via Ollama and current active model profile."""
+    """Lists models configured in model.yaml and models detected in Ollama."""
     ollama_info = inference_engine.check_local_ollama_health()
-    active = registry.get_active_model()
+    configured_models = load_models()
+    active = get_active_model()
     return {
-        "models": [active.model_dump()],
-        "active_model": active.model_dump(),
+        "models": configured_models,
+        "active_model": active,
         "detected_models": ollama_info.get("models", []),
-        "total_active_ram_gb": registry.get_total_vram_usage(),
+    }
+
+
+@app.post("/api/models/register")
+def register_model_endpoint(req: RegisterModelRequest):
+    """Registers or updates a model in model.yaml directly."""
+    model_entry = {
+        "id": req.id.strip(),
+        "name": (req.name or req.id).strip(),
+        "capabilities": req.capabilities or [],
+        "default": req.default or False,
+    }
+    updated_models = save_model(model_entry)
+    sentinel.record_audit_event(
+        event_type="MODEL_REGISTERED",
+        severity="INFO",
+        details=f"Registered model {req.id} in model.yaml",
+        metadata={"model_id": req.id, "capabilities": req.capabilities},
+    )
+    return {
+        "success": True,
+        "models": updated_models,
+        "active_model": get_active_model(),
     }
 
 
@@ -112,7 +142,8 @@ def select_active_model(req: SelectModelRequest):
         details=f"Selected active local model: {req.model_id}",
         metadata={"model_id": req.model_id},
     )
-    return {"success": True, "active_model": registry.get_active_model().model_dump()}
+    return {"success": True, "active_model": get_active_model()}
+
 
 
 @app.post("/api/route")
@@ -186,8 +217,9 @@ def get_scenarios():
 @app.post("/api/knowledge-base/upload")
 async def upload_kb_document(file: UploadFile = File(...)):
     """Uploads and indexes a document directly into the local RAG pipeline."""
-    temp_path = TEMP_UPLOADS_DIR / file.filename
+    temp_path = KB_DOCS_DIR / f"temp_{file.filename}"
     contents = await file.read()
+
     with open(temp_path, "wb") as f:
         f.write(contents)
 

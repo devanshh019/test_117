@@ -10,7 +10,7 @@ from .config import (
     MODEL_CONTEXT_WINDOW,
     MAX_HISTORY_TURNS,
 )
-from .registry import registry
+from .model_manager import get_active_model, set_active_model
 
 
 class LocalSovereignInference:
@@ -24,13 +24,15 @@ class LocalSovereignInference:
     def set_target_model(self, model_tag: str):
         """Explicitly sets user-chosen active model."""
         self.selected_model = model_tag
-        registry.set_active_model(model_tag)
+        set_active_model(model_tag)
 
     def check_local_ollama_health(self) -> Dict[str, Any]:
         """
         Read-only health check. Checks if Ollama is running and lists installed models
         WITHOUT mutating the active model state.
         """
+        active = get_active_model()
+        active_id = active.get("id", "gemma3:4b")
         try:
             resp = self.client.get(
                 f"{self.ollama_url}/api/tags",
@@ -42,7 +44,7 @@ class LocalSovereignInference:
                 return {
                     "available": True,
                     "models": model_names,
-                    "active_model": registry.get_active_model().model_id,
+                    "active_model": active_id,
                     "endpoint": self.ollama_url,
                 }
         except Exception:
@@ -51,27 +53,33 @@ class LocalSovereignInference:
         return {
             "available": False,
             "models": [],
-            "active_model": registry.get_active_model().model_id,
+            "active_model": active_id,
             "endpoint": self.ollama_url,
         }
 
     def _resolve_target_model(self, model_id: Optional[str], installed_models: List[str]) -> str:
-        """Determines which model tag to use for inference."""
+        """Determines which model tag to use for inference, prioritizing router auto-selection."""
+        # 1. Target model assigned by the Router for this specific task
+        if model_id and (not installed_models or model_id in installed_models):
+            return model_id
+        # 2. User manual override
         if self.selected_model and self.selected_model in installed_models:
             return self.selected_model
-        if model_id and model_id in installed_models:
-            return model_id
+        # 3. First available installed model
         if installed_models:
             return installed_models[0]
-        return registry.get_active_model().model_id
+        return get_active_model().get("id", "gemma3:4b")
+
+
 
     def _build_messages_payload(
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
-    ) -> List[Dict[str, str]]:
-        """Constructs the messages list for Ollama /api/chat."""
+        images: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Constructs the messages list for Ollama /api/chat including visual image payloads."""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -84,7 +92,10 @@ class LocalSovereignInference:
                 if content and not content.startswith("> [!WARNING]"):
                     messages.append({"role": role, "content": content})
 
-        messages.append({"role": "user", "content": prompt})
+        user_msg: Dict[str, Any] = {"role": "user", "content": prompt}
+        if images and len(images) > 0:
+            user_msg["images"] = images
+        messages.append(user_msg)
         return messages
 
     def generate(
@@ -93,8 +104,9 @@ class LocalSovereignInference:
         model_id: Optional[str] = None,
         system_prompt: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
+        images: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Sends chat generation request to local Ollama."""
+        """Sends chat generation request to local Ollama with optional visual image attachments."""
         health = self.check_local_ollama_health()
 
         if not health["available"]:
@@ -113,8 +125,10 @@ class LocalSovereignInference:
             }
 
         target_model = self._resolve_target_model(model_id, health["models"])
-        registry.set_active_model(target_model)
-        messages_payload = self._build_messages_payload(prompt, system_prompt, history)
+        set_active_model(target_model)
+        messages_payload = self._build_messages_payload(prompt, system_prompt, history, images)
+
+
 
         try:
             chat_payload = {

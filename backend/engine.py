@@ -1,6 +1,8 @@
 import time
 import re
+import base64
 from typing import Dict, List, Any, Optional
+
 
 from .config import (
     PPTX_TRIGGERS,
@@ -8,7 +10,6 @@ from .config import (
     XLSX_TRIGGERS,
 )
 from .router import router, RoutingDecision
-from .registry import registry
 from .inference import inference_engine
 from .network_guard import sentinel
 from .sandbox_executor import sandbox
@@ -22,9 +23,9 @@ class SovereignAgentEngine:
 
     def __init__(self):
         self.router = router
-        self.registry = registry
         self.inference = inference_engine
         self.sentinel = sentinel
+
 
 
     # Parsing Helpers
@@ -100,15 +101,16 @@ class SovereignAgentEngine:
 
     def _handle_attachments(
         self, attachments: List[Dict[str, Any]]
-    ) -> tuple[List[Dict[str, Any]], str, Optional[Dict[str, Any]]]:
-        """Processes attached files, extracts text or inspects images, and builds step telemetry."""
+    ) -> tuple[List[Dict[str, Any]], str, List[str], Optional[Dict[str, Any]]]:
+        """Processes attached files, extracts base64 images for vision, text from docs, and builds step telemetry."""
         if not attachments:
-            return [], "", None
+            return [], "", [], None
 
         step_start = time.time()
         attached_citations = []
         attached_texts = []
         processed_files = []
+        b64_images = []
 
         for att in attachments:
             name = att.get("name") or att.get("filename") or "attachment"
@@ -116,6 +118,13 @@ class SovereignAgentEngine:
             processed_files.append(name)
 
             if path and path.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                try:
+                    with open(path, "rb") as img_file:
+                        b64 = base64.b64encode(img_file.read()).decode("utf-8")
+                        b64_images.append(b64)
+                except Exception as e:
+                    pass
+
                 info = vision_engine.inspect_image_file(path)
                 if info.get("success"):
                     attached_texts.append(f"[Image Attachment: {name}, Resolution: {info['image_info']['width']}x{info['image_info']['height']}]")
@@ -143,15 +152,50 @@ class SovereignAgentEngine:
             "title": "Local File Ingestion & Parsing",
             "status": "COMPLETED",
             "duration_ms": max(1, elapsed_ms),
-            "details": f"Processed {len(attachments)} user attachment(s): {', '.join(processed_files)}.",
+            "details": f"Processed {len(attachments)} user attachment(s): {', '.join(processed_files)} (Base64 Vision Payload Attached: {len(b64_images)} image(s)).",
         }
 
-        return attached_citations, "\n\n".join(attached_texts), step
+        return attached_citations, "\n\n".join(attached_texts), b64_images, step
+
+    def _should_perform_rag(self, prompt_lower: str, decision: RoutingDecision, has_images: bool = False) -> bool:
+        """Determines if query requires RAG knowledge base search based on intent and grounding need."""
+        # If user uploaded an image and asks a purely generic question (e.g. "whats this"), skip RAG
+        if has_images and not any(k in prompt_lower for k in ["asme", "api", "standard", "gfr", "sop", "manual", "corrosion", "thickness", "compliance", "regulation", "drawing", "p&id", "schematic", "reference", "refer", "plant", "asset"]):
+            return False
+
+        # All governance, compliance, document RAG, and deliverable tasks
+        if decision.task_category in ["STANDARDS_AND_GOVERNANCE_REASONING", "DOCUMENT_RAG_ANALYSIS", "ENTERPRISE_DELIVERABLE_SYNTHESIS"]:
+            return True
+
+        from .config import STANDARDS_TRIGGERS
+        if any(k in prompt_lower for k in STANDARDS_TRIGGERS):
+            return True
+
+        rag_keywords = [
+            # Standards & Regulatory
+            "standard", "sop", "manual", "compliance", "rule", "policy", 
+            "regulation", "clause", "section", "annexure", "guideline", 
+            "procedure", "handbook", "spec", "specification",
+            # References & Grounding in past data / organizational correspondence
+            "reference", "refer", "based on", "according to", "ground", 
+            "past", "record", "correspondence", "history", "audit", 
+            "tender", "turnaround", "inspection", "finding", "compare to last year", 
+            "last year", "previous", "knowledge base",
+            # Industrial Assets, Formulas & Calculations (including for coding)
+            "pressure vessel", "heat exchanger", "boiler", "pipeline", "piping", 
+            "valve", "corrosion", "thickness", "wall thickness", "lmtd", 
+            "allowable stress", "joint efficiency", "hydrotest", "weld", "flange", 
+            "pump", "compressor", "turbine", "column", "reactor", "storage tank", 
+            "safety valve", "interlock", "refinery", "power plant", "formula", 
+            "equation", "derivation", "heat duty", "flow rate"
+        ]
+        return any(k in prompt_lower for k in rag_keywords)
+
 
     def _perform_rag_retrieval(
         self, prompt: str
     ) -> tuple[List[Dict[str, Any]], str, Optional[Dict[str, Any]]]:
-        """Searches local knowledge base and constructs RAG context."""
+        """Searches local knowledge base and constructs RAG context with clear query telemetry."""
         step_start = time.time()
         citations = knowledge_base.search(prompt, top_k=3)
         elapsed_ms = int((time.time() - step_start) * 1000)
@@ -161,18 +205,21 @@ class SovereignAgentEngine:
 
         rag_snippets = []
         for c in citations:
+            c["query"] = prompt
             rag_snippets.append(f"[{c['title']} - Chunk {c['chunk_index']}]:\n{c['full_content']}")
 
         rag_context = "\n\n".join(rag_snippets)
+        unique_titles = ", ".join(list(dict.fromkeys(c["title"] for c in citations)))
         step = {
             "step_id": 3,
             "title": "Local RAG Standards Retrieval",
             "status": "COMPLETED",
             "duration_ms": max(1, elapsed_ms),
-            "details": f"Retrieved {len(citations)} relevant chunk(s) from persistent index.",
+            "details": f"Queried Knowledge Base with: '{prompt}' -> Retrieved {len(citations)} chunk(s) from: {unique_titles}.",
         }
 
         return citations, rag_context, step
+
 
     def _build_system_prompt(
         self,
@@ -184,9 +231,11 @@ class SovereignAgentEngine:
         parts = [
             "You are KAVACH-AI, a local sovereign industrial engineering assistant.",
             f"Assigned Task Category: {decision.task_category}",
-            "Requirements: Respond clearly with rigorous engineering analysis.",
-            "If Python code or plots are required, provide a single executable ```python ... ``` code block.",
+            "Operating Guidelines:",
+            "- Respond clearly with rigorous technical engineering analysis.",
+            "- Code & Visualizations: Whenever asked to draw, plot, chart, graph, or simulate anything (such as straight lines, curves, waveforms, heat transfer, or engineering schematics), you MUST generate an executable Python script using `matplotlib.pyplot` (`plt.plot()`, `plt.title()`, `plt.grid(True)`) inside a single ```python ... ``` code block. The on-premises execution sandbox automatically runs your code and renders the visual graphic for the user. Never say you cannot draw.",
         ]
+
 
         if attached_text:
             parts.append(f"\nUser Attached Documents:\n{attached_text}")
@@ -354,16 +403,21 @@ class SovereignAgentEngine:
         })
 
         # 2. Attachments
-        att_citations, att_text, att_step = self._handle_attachments(attachments)
+        att_citations, att_text, b64_images, att_step = self._handle_attachments(attachments)
         if att_step:
             steps.append(att_step)
         all_citations.extend(att_citations)
 
-        # 3. RAG Lookup
-        rag_citations, rag_context, rag_step = self._perform_rag_retrieval(prompt)
-        if rag_step:
-            steps.append(rag_step)
-        all_citations.extend(rag_citations)
+        # 3. RAG Lookup (Selective & Intent-Based)
+        has_images = len(b64_images) > 0
+        prompt_lower = prompt.lower()
+        if self._should_perform_rag(prompt_lower, decision, has_images=has_images):
+            rag_citations, rag_context, rag_step = self._perform_rag_retrieval(prompt)
+            if rag_step:
+                steps.append(rag_step)
+            all_citations.extend(rag_citations)
+        else:
+            rag_citations, rag_context, rag_step = [], "", None
 
         # 4. LLM Generation
         sys_prompt = self._build_system_prompt(decision, att_text, rag_context)
@@ -373,7 +427,9 @@ class SovereignAgentEngine:
             model_id=override_model or decision.selected_model_id,
             system_prompt=sys_prompt,
             history=history,
+            images=b64_images if b64_images else None,
         )
+
         gen_elapsed_ms = int((time.time() - gen_start) * 1000)
         steps.append({
             "step_id": 4,

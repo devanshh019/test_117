@@ -8,11 +8,15 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_core.documents import Document
 
-from .config import STORAGE_DIR
+from .config import (
+    CHROMA_DIR,
+    SEED_DOCS_DIR,
+    KB_DOCS_DIR,
+    RAG_CHUNK_SIZE,
+    RAG_CHUNK_OVERLAP,
+    RAG_DEFAULT_TOP_K,
+)
 
-# Paths & Storage
-CHROMA_DIR = Path(STORAGE_DIR) / "chroma_db"
-SEED_DIR = Path(STORAGE_DIR).parent / "seed_documents"
 
 # Local ONNX Embedding Function & Text Splitter
 emb_fn = embedding_functions.DefaultEmbeddingFunction()
@@ -26,7 +30,10 @@ class LocalEmbeddings:
         return emb_fn([text])[0]
 
 
-splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=RAG_CHUNK_SIZE,
+    chunk_overlap=RAG_CHUNK_OVERLAP,
+)
 
 vec_store = Chroma(
     collection_name="kavach_standards",
@@ -34,13 +41,15 @@ vec_store = Chroma(
     persist_directory=str(CHROMA_DIR),
 )
 
-retriever = vec_store.as_retriever(search_kwargs={"k": 3})
+retriever = vec_store.as_retriever(search_kwargs={"k": RAG_DEFAULT_TOP_K})
+
 
 
 # Ingest Seed Documents on Startup
 def _seed_db():
-    if SEED_DIR.exists() and len(vec_store.get().get("ids", [])) == 0:
-        for p in SEED_DIR.glob("*.*"):
+    if SEED_DOCS_DIR.exists() and len(vec_store.get().get("ids", [])) == 0:
+        for p in SEED_DOCS_DIR.glob("*.*"):
+
             docs = (
                 PyPDFLoader(str(p)).load()
                 if p.suffix.lower() == ".pdf"
@@ -94,21 +103,29 @@ class LocalRAGKnowledgeBase:
             "document": {"doc_id": doc_id, "title": title},
         }
 
-    def search(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        docs = vec_store.similarity_search(query, k=top_k)
-        return [
-            {
-                "doc_id": d.metadata.get("doc_id", "DOC"),
-                "title": d.metadata.get("title", "Standard Document"),
-                "filename": d.metadata.get("filename", "document.txt"),
+    def search(self, query: str, top_k: int = RAG_DEFAULT_TOP_K) -> List[Dict[str, Any]]:
+        results = vec_store.similarity_search_with_score(query, k=top_k)
+        citations = []
+        for doc, dist in results:
+            # If distance is too high (> 1.72), it is an irrelevant semantic mismatch
+            if dist > 1.72:
+                continue
+
+            # Convert distance to normalized relevance percentage
+            relevance = max(0.5, min(0.99, round(1.0 - (dist / 3.0), 2)))
+            citations.append({
+                "doc_id": doc.metadata.get("doc_id", "DOC"),
+                "title": doc.metadata.get("title", "Standard Document"),
+                "filename": doc.metadata.get("filename", "document.txt"),
                 "chunk_index": 1,
                 "total_chunks": 1,
-                "excerpt": d.page_content[:250] + "...",
-                "full_content": d.page_content,
-                "relevance_score": 0.85,
-            }
-            for d in docs
-        ]
+                "excerpt": doc.page_content[:250] + "...",
+                "full_content": doc.page_content,
+                "relevance_score": relevance,
+                "distance": round(dist, 3)
+            })
+        return citations
+
 
     def list_documents(self) -> List[Dict[str, Any]]:
         metas = vec_store.get(include=["metadatas"]).get("metadatas", [])
