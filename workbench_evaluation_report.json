@@ -1,0 +1,116 @@
+{
+  "metrics": {
+    "min_sec": 53.56,
+    "max_sec": 164.28,
+    "avg_sec": 114.17,
+    "air_gap": "VERIFIED_0_BYTES",
+    "hardware": "Local Server (No Cloud)"
+  },
+  "evaluations": [
+    {
+      "id": "BM-01",
+      "pillar": "Engineering Math & Python Sandbox Simulation",
+      "prompt": "Calculate the Log Mean Temperature Difference (LMTD) for a counter-flow heat exchanger (Th_in=150C, Th_out=80C, Tc_in=30C, Tc_out=70C). Simulate and plot temperature profiles.",
+      "category": "ENGINEERING_MATH_AND_CODE",
+      "model": "Qwen 2.5 Coder Internal Tool Specialist",
+      "total_elapsed_sec": 53.56,
+      "phase_timings_ms": {
+        "Intent Classification & Task Routing": 186,
+        "Local RAG Standards Retrieval": 170,
+        "Local Foundation Model Inference (Ollama (qwen2.5:0.5b))": 44172,
+        "Sandboxed Python Execution & Verification": 9031
+      },
+      "deliverables_count": 1,
+      "deliverables": [
+        "exec_sim_1788198949919.py"
+      ],
+      "citations_count": 3,
+      "status": "COMPLETED"
+    },
+    {
+      "id": "BM-02",
+      "pillar": "Standards & Regulatory Compliance (RAG Grounding)",
+      "prompt": "What is the minimum allowable wall thickness formula and corrosion allowance under ASME Section VIII Division 1 and API 510?",
+      "category": "STANDARDS_AND_GOVERNANCE_REASONING",
+      "model": "Gemma 3 4B Sovereign Standards & Governance",
+      "total_elapsed_sec": 102.27,
+      "phase_timings_ms": {
+        "Intent Classification & Task Routing": 174,
+        "Local RAG Standards Retrieval": 120,
+        "Local Foundation Model Inference (Ollama (gemma3:4b))": 77565,
+        "Sandboxed Python Execution & Verification": 24059,
+        "Industrial Deliverable Synthesis": 325
+      },
+      "deliverables_count": 2,
+      "deliverables": [
+        "exec_sim_1788199036815.py",
+        "Document_What_Is_The_Minimum_Allo_1788199061.docx"
+      ],
+      "citations_count": 3,
+      "status": "COMPLETED"
+    },
+    {
+      "id": "BM-03",
+      "pillar": "Enterprise Deliverable Synthesis (Word .docx)",
+      "prompt": "Draft a formal Word document approval note (.docx) for refinery turnaround boiler inspection and maintenance authorization.",
+      "category": "STANDARDS_AND_GOVERNANCE_REASONING",
+      "model": "Gemma 3 4B Sovereign Standards & Governance",
+      "total_elapsed_sec": 155.22,
+      "phase_timings_ms": {
+        "Intent Classification & Task Routing": 530,
+        "Local RAG Standards Retrieval": 442,
+        "Local Foundation Model Inference (Ollama (gemma3:4b))": 97750,
+        "Sandboxed Python Execution & Verification": 56235,
+        "Industrial Deliverable Synthesis": 225
+      },
+      "deliverables_count": 2,
+      "deliverables": [
+        "exec_sim_1788199159953.py",
+        "Document_A_Formal_Word_Document_A_1788199216.docx"
+      ],
+      "citations_count": 3,
+      "status": "COMPLETED"
+    },
+    {
+      "id": "BM-04",
+      "pillar": "Multimodal Vision & P&ID Drawing Inspection",
+      "prompt": "Inspect P&ID for crude-free blast train, identify all control valves, transmitters, and verify safety bypass line compliance.",
+      "category": "MULTIMODAL_IMAGE_INSPECTION",
+      "model": "LLaVA 7B Multimodal Vision & Drawing Inspector",
+      "total_elapsed_sec": 95.52,
+      "phase_timings_ms": {
+        "Intent Classification & Task Routing": 500,
+        "Local Foundation Model Inference (Ollama (gemma3:4b))": 65173,
+        "Sandboxed Python Execution & Verification": 29662
+      },
+      "deliverables_count": 1,
+      "deliverables": [
+        "exec_sim_1788199282293.py"
+      ],
+      "citations_count": 0,
+      "status": "COMPLETED"
+    },
+    {
+      "id": "BM-05",
+      "pillar": "Complex Multi-Step Sovereign Workflow",
+      "prompt": "Evaluate SA-516 Grade 70 plate ultrasonic thickness data against ASME allowable stress, generate an engineering plot, and draft an approval note.",
+      "category": "STANDARDS_AND_GOVERNANCE_REASONING",
+      "model": "Gemma 3 4B Sovereign Standards & Governance",
+      "total_elapsed_sec": 164.28,
+      "phase_timings_ms": {
+        "Intent Classification & Task Routing": 448,
+        "Local RAG Standards Retrieval": 220,
+        "Local Foundation Model Inference (Ollama (gemma3:4b))": 92699,
+        "Sandboxed Python Execution & Verification": 70639,
+        "Industrial Deliverable Synthesis": 242
+      },
+      "deliverables_count": 2,
+      "deliverables": [
+        "exec_sim_1788199405356.py",
+        "Document_Evaluate_Sa_516_Grade_70_1788199476.docx"
+      ],
+      "citations_count": 3,
+      "status": "COMPLETED"
+    }
+  ]
+}

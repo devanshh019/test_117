@@ -919,11 +919,13 @@ export default function App() {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           routing: data.routing,
           steps: data.steps,
+          citations: data.citations,
           artifacts: data.artifacts,
           sandbox_output: data.sandbox_output,
           sovereign_proof: data.sovereign_proof,
           elapsed_seconds: data.elapsed_seconds
         };
+
 
         // If artifacts were generated and user is still on this session, auto-open in right inspector!
         if (targetSessionId === currentSessionId && data.artifacts && data.artifacts.length > 0) {
@@ -1513,8 +1515,35 @@ export default function App() {
                       </div>
                     )}
 
+                    {/* Knowledge Base Retrieved Sources (Metadata Only: File Names & Titles) */}
+                    {msg.citations && msg.citations.length > 0 && (
+                      <div className="pt-2">
+                        <div className="flex items-center space-x-1.5 text-[10px] font-mono text-[#78716c] uppercase tracking-wider font-semibold mb-1.5">
+                          <BookOpen className="w-3 h-3 text-[#ea580c]" />
+                          <span>Knowledge Base Documents Retrieved ({Array.from(new Set(msg.citations.map(c => c.filename || c.title))).length})</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Array.from(new Set(msg.citations.map(c => JSON.stringify({ title: c.title, filename: c.filename })))).map((raw, cIdx) => {
+                            const doc = JSON.parse(raw);
+                            return (
+                              <div
+                                key={cIdx}
+                                className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-[#faf8f5] border border-[#e5ded1] text-[11px] font-mono shadow-2xs hover:border-[#ea580c] transition-colors"
+                                title={`Retrieved source: ${doc.title} (${doc.filename})`}
+                              >
+                                <FileText className="w-3 h-3 text-[#ea580c]" />
+                                <span className="font-medium text-[#1c1917]">{doc.title}</span>
+                                <span className="text-[#a8a29e] text-[10px]">[{doc.filename}]</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Generated deliverables */}
                     {msg.artifacts && msg.artifacts.length > 0 && (
+
                       <div className="pt-3 border-t border-[#f0eae0]">
                         <div className="text-[10px] uppercase tracking-wider text-[#ea580c] font-bold mb-2 flex items-center space-x-1.5">
                           <Download className="w-3 h-3" />

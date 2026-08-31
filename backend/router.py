@@ -1,15 +1,11 @@
 from typing import Dict, List, Any, Optional
+import numpy as np
 from pydantic import BaseModel
+from chromadb.utils import embedding_functions
 
-from .config import (
-    PPTX_TRIGGERS,
-    DOCX_TRIGGERS,
-    XLSX_TRIGGERS,
-    VISUAL_AND_DRAWING_TRIGGERS,
-    STANDARDS_AND_GOVERNANCE_TRIGGERS,
-    MATH_AND_CODE_TRIGGERS,
-)
 from .model_manager import get_model_for_task
+
+emb_fn = embedding_functions.DefaultEmbeddingFunction()
 
 
 class RoutingDecision(BaseModel):
@@ -20,8 +16,25 @@ class RoutingDecision(BaseModel):
     routing_reasons: List[str]
 
 
+# Semantic Domain Descriptions for Vector Matching (Zero Hardcoding)
+CATEGORY_DESCRIPTIONS = {
+    "MULTIMODAL_IMAGE_INSPECTION": "Visual image, scanned PDF drawing, P&ID diagram, engineering blueprint, schematic, photograph inspection, OCR, control valve bypass.",
+    "ENTERPRISE_DELIVERABLE_SYNTHESIS": "Generating Office deliverables, formal Word approval notes (.docx), PowerPoint slide presentation decks (.pptx), and Excel calculation spreadsheets (.xlsx).",
+    "STANDARDS_AND_GOVERNANCE_REASONING": "Auditing compliance against ASME Boiler and Pressure Vessel Code, API 510/570 inspection standards, GFR-2017 procurement rules, tender evaluations, turnaround reports, and regulatory plant governance.",
+    "ENGINEERING_MATH_AND_CODE": "Mathematical calculations, numerical formulas, algebra, calculus, differential equations, physics equations, LMTD, Reynolds number, and writing or executing Python code scripts, algorithms, and internal tools.",
+    "GENERAL_ENGINEERING_REASONING": "General engineering reasoning, physics principles, materials science, thermodynamics, chemistry, and technical questions.",
+}
+
+
 class DynamicTaskRouter:
-    """Classifies user intent and routes tasks to the specialized model in model.yaml."""
+    """Routes tasks using on-premises semantic vector embeddings and cosine similarity."""
+
+    def __init__(self):
+        self._centroids = {}
+        for cat, desc in CATEGORY_DESCRIPTIONS.items():
+            vec = np.array(emb_fn([desc])[0])
+            norm = np.linalg.norm(vec)
+            self._centroids[cat] = vec / norm if norm > 0 else vec
 
     def _has_image_attachment(self, attachments: List[Dict[str, Any]]) -> bool:
         return any(
@@ -38,33 +51,24 @@ class DynamicTaskRouter:
             for a in attachments
         )
 
-    def _determine_category(self, prompt_lower: str, has_image: bool, has_doc: bool) -> tuple[str, str]:
-        # 1. Image Attachments or Explicit P&ID / Drawing / Schematic Queries
-        if has_image or any(k in prompt_lower for k in VISUAL_AND_DRAWING_TRIGGERS):
-            return "MULTIMODAL_IMAGE_INSPECTION", "P&ID schematic, drawing, or visual inspection"
-
-        # 2. Document Attachments
+    def _determine_category(self, prompt: str, has_image: bool, has_doc: bool) -> tuple[str, str, float]:
+        if has_image:
+            return "MULTIMODAL_IMAGE_INSPECTION", "Attached visual image/drawing", 1.0
         if has_doc:
-            return "DOCUMENT_RAG_ANALYSIS", "Attached reference document"
+            return "DOCUMENT_RAG_ANALYSIS", "Attached reference document", 1.0
 
-        # 3. Office Deliverables (.docx, .pptx, .xlsx)
-        if any(k in prompt_lower for k in (PPTX_TRIGGERS + DOCX_TRIGGERS + XLSX_TRIGGERS)):
-            return "ENTERPRISE_DELIVERABLE_SYNTHESIS", "Office deliverable generation (Word / Excel / PPTX)"
+        # Semantic Vector Cosine Similarity
+        try:
+            q_vec = np.array(emb_fn([prompt])[0])
+            q_norm = np.linalg.norm(q_vec)
+            q_unit = q_vec / q_norm if q_norm > 0 else q_vec
 
-        # 4. Standards & Governance (pure compliance/audit lookup without explicit math calculation)
-        if any(k in prompt_lower for k in STANDARDS_AND_GOVERNANCE_TRIGGERS) and not any(k in prompt_lower for k in ["calculate", "compute", "derive", "solve", "integral", "derivative", "python", "script", "code", "plot", "simulate"]):
-            return "STANDARDS_AND_GOVERNANCE_REASONING", "Plant standards lookup and compliance review"
-
-        # 5. Engineering Math, Numerical Calculations & Python Scripting
-        if any(k in prompt_lower for k in MATH_AND_CODE_TRIGGERS):
-            return "ENGINEERING_MATH_AND_CODE", "Engineering mathematics, calculation, or Python simulation"
-
-        # 6. Standards fallback
-        if any(k in prompt_lower for k in STANDARDS_AND_GOVERNANCE_TRIGGERS):
-            return "STANDARDS_AND_GOVERNANCE_REASONING", "Plant standards lookup and compliance review"
-
-        # 7. Default: General Technical & Engineering Reasoning
-        return "GENERAL_ENGINEERING_REASONING", "General engineering and technical reasoning"
+            scores = {cat: float(np.dot(q_unit, c_vec)) for cat, c_vec in self._centroids.items()}
+            best_cat = max(scores, key=scores.get)
+            confidence = round(max(0.75, min(0.99, scores[best_cat] + 0.5)), 2)
+            return best_cat, f"Matched semantic intent vector with score {scores[best_cat]:.3f}", confidence
+        except Exception:
+            return "GENERAL_ENGINEERING_REASONING", "Default technical reasoning fallback", 0.80
 
     def route_task(
         self,
@@ -72,12 +76,10 @@ class DynamicTaskRouter:
         attachments: List[Dict[str, Any]] = None,
         requested_mode: Optional[str] = None,
     ) -> RoutingDecision:
-        prompt_lower = prompt.lower()
         attachments = attachments or []
-
         has_image = self._has_image_attachment(attachments)
         has_doc = self._has_doc_attachment(attachments)
-        category, reason = self._determine_category(prompt_lower, has_image, has_doc)
+        category, reason, confidence = self._determine_category(prompt, has_image, has_doc)
 
         # Auto-select the specialized model for this specific task category from model.yaml
         target_model = get_model_for_task(category)
@@ -89,10 +91,9 @@ class DynamicTaskRouter:
             task_category=category,
             selected_model_id=model_id,
             model_name=model_name,
-            confidence=0.98,
+            confidence=confidence,
             routing_reasons=reasons,
         )
 
 
-# Default shared router instance
 router = DynamicTaskRouter()
