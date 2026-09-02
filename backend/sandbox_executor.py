@@ -1,5 +1,4 @@
-#AARUSHI
-
+# Isolated Python Subprocess Execution Sandbox and Plot Exporter
 import os
 import subprocess
 import sys

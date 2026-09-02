@@ -1,11 +1,93 @@
+# ==============================================================================
+# Sovereign AI Industrial Workbench - Git Ignore Policy
+# ==============================================================================
+
+# OS System Files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Python Virtual Environments & Packages
 .venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+*.egg-info/
+.installed.cfg
+*.egg
+build/
+dist/
+wheels/
+
+# Python Bytecode & Cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 backend/**/__pycache__/
+frontend/**/__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node & Frontend Build Artifacts
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
+.npm
+.yarn/
+*.tsbuildinfo
+
+# Application Generated Runtime Deliverables & Sandbox Storage
+backend/data/storage/*
+!backend/data/storage/.gitkeep
+backend/data/storage/chroma_db/
+backend/data/storage/temp_uploads/*
+!backend/data/storage/temp_uploads/.gitkeep
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+backend/data/vector_store/*
+!backend/data/vector_store/.gitkeep
+backend/data/cache/*
+!backend/data/cache/.gitkeep
+*.docx
+*.pptx
+*.xlsx
+*.pdf
+plot_*.png
+agent_calc_*.py
+test_sim_*.py
+exec_sim_*.py
+sandbox_sim_*.py
+
+# Logs, Databases & Session Files
 *.log
+*.log.*
 :memory:.ses
-backend/data/storage/temp_uploads/
+*.sqlite
+*.sqlite3
+*.db
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cert
+
+# Editor & IDE Configs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

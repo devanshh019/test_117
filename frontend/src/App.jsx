@@ -8,9 +8,6 @@ import {
   ArrowDown, Activity, Paperclip, UploadCloud, File, RefreshCw, AlertCircle
 } from 'lucide-react';
 
-import VoiceOrb from './components/VoiceOrb';
-
-
 function FormattedMarkdown({ content }) {
   if (!content) return null;
 
@@ -106,11 +103,9 @@ function DeliverableInspector({ artifact, onClose, onZoomImage }) {
   const renderContent = () => {
     // 1. WORD DOCUMENT (.docx / document)
     if (rawType === 'docx' || rawType === 'doc' || rawType === 'document') {
-      const paragraphs = artifact.paragraphs || [
-        artifact.subject || artifact.title || 'Official Technical Directive',
-        'This official engineering document has been synthesized and certified locally under on-premises sovereign protocols with zero cloud egress.',
-        'All calculation parameters, allowable stress values, and inspection turnaround requirements comply with applicable plant standards.'
-      ];
+      const paragraphs = artifact.paragraphs && artifact.paragraphs.length > 0
+        ? artifact.paragraphs
+        : (artifact.subject ? [artifact.subject] : ['No document sections recorded.']);
 
       return (
         <div className="space-y-3">
@@ -160,13 +155,8 @@ function DeliverableInspector({ artifact, onClose, onZoomImage }) {
 
     // 2. EXCEL SPREADSHEET (.xlsx / spreadsheet)
     if (rawType === 'xlsx' || rawType === 'xls' || rawType === 'spreadsheet') {
-      const headers = artifact.headers || ['Item', 'Parameter', 'Value', 'Unit', 'Compliance Status'];
-      const rows = artifact.rows || [
-        ['PARAM-1', 'Design Operating Pressure', '18.5', 'bar', 'VERIFIED'],
-        ['PARAM-2', 'Operating Temperature', '350.0', '°C', 'VERIFIED'],
-        ['PARAM-3', 'Calculated Corrosion Rate', '0.42', 'mm/year', 'FLAGGED'],
-        ['PARAM-4', 'Estimated Remaining Life', '4.8', 'years', 'ACCEPTABLE'],
-      ];
+      const headers = artifact.headers && artifact.headers.length > 0 ? artifact.headers : ['Column 1', 'Column 2'];
+      const rows = artifact.rows && artifact.rows.length > 0 ? artifact.rows : [];
 
       return (
         <div className="space-y-3">
@@ -182,48 +172,54 @@ function DeliverableInspector({ artifact, onClose, onZoomImage }) {
             </div>
 
             {/* Interactive Data Table */}
-            <div className="overflow-x-auto rounded border border-[#e5ded1]">
-              <table className="w-full text-left text-[11px] font-mono">
-                <thead className="bg-[#1c1917] text-[#f4efe6]">
-                  <tr>
-                    {headers.map((h, hIdx) => (
-                      <th key={hIdx} className="p-2 font-semibold border-b border-[#334155] whitespace-nowrap">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#e5ded1] bg-[#ffffff]">
-                  {rows.map((row, rIdx) => (
-                    <tr key={rIdx} className="hover:bg-[#faf8f5] transition-colors">
-                      {row.map((cell, cIdx) => {
-                        const cellStr = String(cell);
-                        const isStatus = cellStr === 'VERIFIED' || cellStr === 'FLAGGED' || cellStr === 'ACCEPTABLE';
-                        return (
-                          <td key={cIdx} className="p-2 whitespace-nowrap text-[#1c1917]">
-                            {isStatus ? (
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                  cellStr === 'VERIFIED'
-                                    ? 'bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0]'
-                                    : cellStr === 'FLAGGED'
-                                    ? 'bg-[#fef2f2] text-[#dc2626] border border-[#fecaca]'
-                                    : 'bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe]'
-                                }`}
-                              >
-                                {cellStr}
-                              </span>
-                            ) : (
-                              cellStr
-                            )}
-                          </td>
-                        );
-                      })}
+            {rows.length > 0 ? (
+              <div className="overflow-x-auto rounded border border-[#e5ded1]">
+                <table className="w-full text-left text-[11px] font-mono">
+                  <thead className="bg-[#1c1917] text-[#f4efe6]">
+                    <tr>
+                      {headers.map((h, hIdx) => (
+                        <th key={hIdx} className="p-2 font-semibold border-b border-[#334155] whitespace-nowrap">
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-[#e5ded1] bg-[#ffffff]">
+                    {rows.map((row, rIdx) => (
+                      <tr key={rIdx} className="hover:bg-[#faf8f5] transition-colors">
+                        {row.map((cell, cIdx) => {
+                          const cellStr = String(cell);
+                          const isStatus = cellStr === 'VERIFIED' || cellStr === 'FLAGGED' || cellStr === 'ACCEPTABLE';
+                          return (
+                            <td key={cIdx} className="p-2 whitespace-nowrap text-[#1c1917]">
+                              {isStatus ? (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    cellStr === 'VERIFIED'
+                                      ? 'bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0]'
+                                      : cellStr === 'FLAGGED'
+                                      ? 'bg-[#fef2f2] text-[#dc2626] border border-[#fecaca]'
+                                      : 'bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe]'
+                                  }`}
+                                >
+                                  {cellStr}
+                                </span>
+                              ) : (
+                                cellStr
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="p-4 text-center text-xs text-[#78716c] bg-[#faf8f5] rounded border border-[#e5ded1]">
+                No tabular rows in spreadsheet.
+              </div>
+            )}
 
             <div className="text-[10px] text-[#78716c] font-mono flex items-center justify-between pt-1">
               <span>Sheet: Calculations</span>
@@ -240,12 +236,8 @@ function DeliverableInspector({ artifact, onClose, onZoomImage }) {
         ? artifact.slides
         : [
             {
-              title: artifact.title || 'Executive Overview',
-              bullets: [
-                'Comprehensive technical evaluation per industry standard codes',
-                'Integrity assessments and turnaround scheduling parameters',
-                'Certified on-premises sovereign analysis with zero cloud egress'
-              ]
+              title: artifact.title || 'Presentation',
+              bullets: ['No slide content generated.']
             }
           ];
 
@@ -710,12 +702,77 @@ export default function App() {
     }
   };
 
+  // When switching chats, jump immediately to the bottom of the active chat and hide the scroll-down button
+  useEffect(() => {
+    isUserAtBottomRef.current = true;
+    setShowScrollBottomBtn(false);
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }, 40);
+  }, [currentSessionId]);
+
   // Only auto-scroll on new message added IF user was already at the bottom
   useEffect(() => {
     if (isUserAtBottomRef.current) {
       scrollToBottom();
     }
   }, [messages.length, loadingSessionId]);
+
+  // Inline Voice Recognition for Chat Input
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRec) {
+      alert("Voice speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.");
+      return;
+    }
+
+    try {
+      const rec = new SpeechRec();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+
+      rec.onstart = () => {
+        setIsListening(true);
+      };
+
+      rec.onresult = (event) => {
+        let text = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            text += event.results[i][0].transcript + ' ';
+          }
+        }
+        if (text) {
+          setPrompt(prev => prev ? `${prev.trim()} ${text.trim()}` : text.trim());
+        }
+      };
+
+      rec.onerror = () => {
+        setIsListening(false);
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (e) {
+      setIsListening(false);
+    }
+  };
 
   // Live Timer during active inference execution
   useEffect(() => {
@@ -883,7 +940,7 @@ export default function App() {
       taskType: predictedCategory,
       targetAction: `Executing task with ${predictedModel}`,
       model: predictedModel,
-      endpoint: "http://127.0.0.1:11434",
+      endpoint: healthData?.ollama_backend?.endpoint || "http://127.0.0.1:11434",
       networkEgress: "0 Bytes (Air-Gapped)"
     });
 
@@ -891,11 +948,10 @@ export default function App() {
     setLoadingSessionId(targetSessionId);
     setThinkingExpanded(false);
     
-    // User explicitly sent a message -> scroll to bottom once
-    isUserAtBottomRef.current = true;
-    setTimeout(() => scrollToBottom(true), 50);
-
-    const historyPayload = messages.map(m => ({
+    // Strict Per-Chat Session Isolation: only pass history belonging to this specific chat session
+    const targetSession = sessions.find(s => s.id === targetSessionId);
+    const targetMessages = targetSession ? targetSession.messages : [];
+    const historyPayload = targetMessages.map(m => ({
       role: m.role,
       content: m.content
     }));
@@ -922,6 +978,7 @@ export default function App() {
           citations: data.citations,
           artifacts: data.artifacts,
           sandbox_output: data.sandbox_output,
+          scratchpad: data.scratchpad,
           sovereign_proof: data.sovereign_proof,
           elapsed_seconds: data.elapsed_seconds
         };
@@ -1251,15 +1308,22 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setRightPanelOpen(!rightPanelOpen)}
+              onClick={() => {
+                if (rightPanelOpen) {
+                  setRightPanelOpen(false);
+                  setSelectedDeliverable(null);
+                } else {
+                  setRightPanelOpen(true);
+                }
+              }}
               className={`p-1.5 rounded-md border transition-colors ${
                 rightPanelOpen
-                  ? 'bg-[#ea580c] text-white border-[#ea580c]'
+                  ? 'bg-[#ede7dc] text-[#1c1917] hover:bg-[#d6cebf] border-[#d6cebf]'
                   : 'bg-[#ffffff] text-[#78716c] hover:text-[#1c1917] border-[#d6cebf]'
               }`}
-              title={rightPanelOpen ? "Hide right panel" : "Show right panel"}
+              title={rightPanelOpen ? "Close Deliverables Inspector" : "Open Deliverables Inspector"}
             >
-              {selectedDeliverable ? <FileCheck className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              {rightPanelOpen ? <X className="w-4 h-4 text-[#ea580c]" /> : <FileCheck className="w-4 h-4 text-[#78716c]" />}
             </button>
           </div>
         </header>
@@ -1475,41 +1539,71 @@ export default function App() {
 
                         {isTraceExpanded && (
                           <div className="mt-2 space-y-1.5 p-2 rounded-lg bg-[#faf8f5] border border-[#e5ded1]">
-                            {msg.steps.map((st) => {
-                              const isStepExpanded = expandedSteps[`${msg.id}-${st.step_number}`];
+                            {msg.steps.map((st, stIdx) => {
+                              const stepNum = st.step_number || st.step_id || (stIdx + 1);
+                              const stepKey = `${msg.id}-${stepNum}`;
+                              const isStepExpanded = !!expandedSteps[stepKey];
                               return (
                                 <div
-                                  key={st.step_number}
+                                  key={stepNum}
                                   className="rounded-lg border border-[#e5ded1] bg-[#ffffff] overflow-hidden text-xs"
                                 >
                                   <button
-                                    onClick={() => toggleStep(msg.id, st.step_number)}
-                                    className="w-full flex items-center justify-between p-2 hover:bg-[#f4efe6] text-left font-mono text-[11px]"
+                                    onClick={() => toggleStep(msg.id, stepNum)}
+                                    className="w-full flex items-center justify-between p-2.5 hover:bg-[#f4efe6] text-left font-mono text-[11px] transition-colors"
                                   >
                                     <div className="flex items-center space-x-2 truncate">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-[#ea580c] shrink-0" />
-                                      <span className="font-medium text-[#1c1917] truncate">
-                                        Phase {st.step_number}: {st.title}
+                                      <div className="w-2 h-2 rounded-full bg-[#ea580c] shrink-0" />
+                                      <span className="font-semibold text-[#1c1917] truncate">
+                                        Phase {stepNum}: {st.title}
                                       </span>
                                     </div>
                                     <div className="flex items-center space-x-2 text-[#78716c] shrink-0">
-                                      <span>{st.duration_ms}ms</span>
+                                      <span className="text-[10px] bg-[#f4efe6] px-1.5 py-0.5 rounded border border-[#e5ded1]">{st.duration_ms}ms</span>
                                       {isStepExpanded ? (
-                                        <ChevronDown className="w-3 h-3" />
+                                        <ChevronDown className="w-3.5 h-3.5 text-[#ea580c]" />
                                       ) : (
-                                        <ChevronRight className="w-3 h-3" />
+                                        <ChevronRight className="w-3.5 h-3.5 text-[#78716c]" />
                                       )}
                                     </div>
                                   </button>
 
                                   {isStepExpanded && (
-                                    <div className="p-3 pt-1 border-t border-[#e5ded1] bg-[#faf8f5] space-y-2 text-[#44403c]">
-                                      {st.details && <p className="text-[#44403c]">{st.details}</p>}
+                                    <div className="p-3 border-t border-[#e5ded1] bg-[#faf8f5] space-y-2">
+                                      {st.status && (
+                                        <div className="flex items-center space-x-2 text-[10px] font-mono">
+                                          <span className="text-[#78716c] uppercase font-bold">Execution Status:</span>
+                                          <span className={`px-2 py-0.5 rounded font-bold ${
+                                            st.status === 'COMPLETED'
+                                              ? 'bg-[#f0fdf4] text-[#16a34a] border border-[#bbf7d0]'
+                                              : 'bg-[#fff7ed] text-[#ea580c] border border-[#fed7aa]'
+                                          }`}>
+                                            {st.status}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {st.details && (
+                                        <div className="bg-[#ffffff] p-3 rounded-md border border-[#e5ded1] font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-[#1c1917] shadow-xs">
+                                          {st.details}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </div>
                               );
                             })}
+
+                            {msg.scratchpad && (
+                              <div className="mt-2 rounded-lg border border-[#fed7aa] bg-[#fffaf5] p-3 text-xs">
+                                <div className="flex items-center space-x-1.5 text-[10px] font-mono text-[#ea580c] font-bold uppercase tracking-wider mb-2">
+                                  <Code2 className="w-3.5 h-3.5 text-[#ea580c]" />
+                                  <span>Agent Working Memory & Tool I/O Payloads</span>
+                                </div>
+                                <div className="p-3 bg-[#ffffff] rounded-md border border-[#fed7aa] font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-[#1c1917] max-h-72 overflow-y-auto">
+                                  {msg.scratchpad}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1625,66 +1719,92 @@ export default function App() {
             })
           )}
 
-          {/* Thinking indicator */}
+          {/* Live Routing & Agent Execution Telemetry */}
           {isCurrentSessionLoading && (
-            <div className="flex space-x-3 max-w-3xl mx-auto items-start">
+            <div className="flex space-x-3 max-w-3xl mx-auto items-start animate-in fade-in duration-200">
               {/* Status indicator ball */}
               <div className="relative w-6 h-6 flex items-center justify-center shrink-0 mt-0.5">
                 <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-[#ea580c] via-[#f97316] to-[#fbbf24] animate-slime shadow-sm" />
                 <div className="absolute inset-0 w-6 h-6 rounded-full bg-[#ea580c]/20 animate-ping pointer-events-none" />
               </div>
 
-              {/* Status badge */}
-              <div className="flex flex-col space-y-1.5">
-                <button
-                  type="button"
-                  onClick={() => setThinkingExpanded(!thinkingExpanded)}
-                  className="inline-flex items-center space-x-2 py-1 px-3 rounded-full bg-[#fff7ed] hover:bg-[#ffedd5] border border-[#fed7aa] text-[11px] font-mono text-[#1c1917] w-fit shadow-xs transition-all cursor-pointer group"
-                >
-                  <Cpu className="w-3.5 h-3.5 text-[#ea580c] animate-pulse" />
-                  <span className="font-bold text-[#ea580c]">
-                    Routed: {activeTaskMeta?.model || 'Classifying...'}
-                  </span>
-                  <span className="text-[#fed7aa]">•</span>
-                  <span className="text-[#9a3412] font-semibold text-[10px]">{elapsedTimer}s</span>
-                  <span className="text-[#fed7aa]">•</span>
-                  <span className="text-[#78716c] group-hover:text-[#1c1917] text-[10px]">
-                    {thinkingExpanded ? "Hide details" : "Inspect trace"}
-                  </span>
-                  {thinkingExpanded ? (
-                    <ChevronDown className="w-3 h-3 text-[#78716c] group-hover:text-[#ea580c] transition-colors" />
-                  ) : (
-                    <ChevronRight className="w-3 h-3 text-[#78716c] group-hover:text-[#ea580c] transition-colors" />
-                  )}
-                </button>
+              {/* Live Card */}
+              <div className="flex flex-col space-y-2 w-full max-w-xl">
+                <div className="flex items-center space-x-2">
+                  <div className="inline-flex items-center space-x-2 py-1 px-3 rounded-full bg-[#fff7ed] border border-[#fed7aa] text-[11px] font-mono text-[#1c1917] w-fit shadow-xs">
+                    <Cpu className="w-3.5 h-3.5 text-[#ea580c] animate-spin" />
+                    <span className="font-bold text-[#ea580c]">
+                      Agentic ReAct: {activeTaskMeta?.model || 'Local Model'}
+                    </span>
+                    <span className="text-[#fed7aa]">•</span>
+                    <span className="text-[#9a3412] font-bold text-[10px]">{elapsedTimer}s</span>
+                  </div>
 
+                  <button
+                    type="button"
+                    onClick={() => setThinkingExpanded(!thinkingExpanded)}
+                    className="inline-flex items-center space-x-1.5 py-1 px-2.5 rounded-full bg-[#f4efe6] hover:bg-[#ede7dc] border border-[#e5ded1] text-[10px] font-mono text-[#78716c] hover:text-[#1c1917] transition-all cursor-pointer"
+                  >
+                    <span>{thinkingExpanded ? 'Hide Routing' : 'View Routing'}</span>
+                    {thinkingExpanded ? <ChevronDown className="w-3 h-3 text-[#ea580c]" /> : <ChevronRight className="w-3 h-3 text-[#78716c]" />}
+                  </button>
+                </div>
 
-                {/* Expanded telemetry */}
-                {thinkingExpanded && activeTaskMeta && (
-                  <div className="p-3 rounded-xl bg-[#f4efe6] border border-[#e5ded1] text-[11px] font-mono text-[#57534e] space-y-2 max-w-md shadow-xs animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between border-b border-[#e5ded1] pb-1.5">
-                      <div className="flex items-center space-x-1.5 text-[#ea580c] font-semibold text-[10px] uppercase tracking-wider">
-                        <Activity className="w-3.5 h-3.5 text-[#ea580c]" />
-                        <span>{activeTaskMeta.taskType}</span>
+                {thinkingExpanded && (
+                  <div className="p-3.5 rounded-xl bg-[#ffffff] border border-[#e5ded1] text-[11px] font-mono text-[#57534e] space-y-2.5 shadow-sm animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between border-b border-[#f0eae0] pb-2 text-[10px] font-semibold text-[#78716c]">
+                      <div className="flex items-center space-x-1.5 text-[#ea580c]">
+                        <Terminal className="w-3.5 h-3.5 text-[#ea580c]" />
+                        <span>LIVE ROUTING & EXECUTION TELEMETRY</span>
                       </div>
-                      <span className="text-[10px] text-[#1c1917] font-bold bg-[#ffffff] px-2 py-0.5 rounded border border-[#d6cebf]">
-                        {elapsedTimer}s
+                      <span className="text-[#16a34a] bg-[#f0fdf4] px-2 py-0.5 rounded border border-[#bbf7d0]">
+                        100% AIR-GAPPED (0 B EGRESS)
                       </span>
                     </div>
 
-                    <p className="text-[#1c1917] font-medium leading-relaxed">
-                      {activeTaskMeta.targetAction}
-                    </p>
+                    <div className="space-y-1.5">
+                      {/* Step 1: Real Intent Classification & Dispatched Persona */}
+                      <div className="p-2 rounded-lg bg-[#faf8f5] border border-[#e5ded1] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-[#16a34a] shrink-0" />
+                            <span className="font-semibold text-[#1c1917]">Intent Vector Classification</span>
+                          </div>
+                          <span className="text-[10px] font-bold text-[#16a34a] bg-[#f0fdf4] px-1.5 py-0.5 rounded border border-[#bbf7d0]">
+                            COMPLETED
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-[#78716c] pl-5.5">
+                          Category: <strong className="text-[#ea580c]">{activeTaskMeta?.taskType || 'STANDARDS_AND_GOVERNANCE_REASONING'}</strong>
+                        </div>
+                        <div className="text-[10px] text-[#78716c] pl-5.5">
+                          Dispatched Persona: <strong className="text-[#1c1917]">{activeTaskMeta?.model || 'Gemma 3 4B Sovereign Standards & Governance'}</strong>
+                        </div>
+                      </div>
 
-                    <div className="pt-1.5 border-t border-[#e5ded1] grid grid-cols-2 gap-2 text-[10px]">
-                      <div>
-                        <span className="text-[#78716c]">Inference Host:</span>{" "}
-                        <span className="text-[#1c1917] font-semibold">{activeTaskMeta.model}</span>
+                      {/* Step 2: Real Active ReAct Agent Execution Loop */}
+                      <div className="p-2 rounded-lg bg-[#fffaf5] border border-[#fed7aa] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <div className="w-2.5 h-2.5 rounded-full bg-[#ea580c] animate-ping shrink-0" />
+                            <span className="font-semibold text-[#1c1917]">ReAct Multi-Turn Engine</span>
+                          </div>
+                          <span className="text-[10px] font-bold text-[#ea580c] bg-[#fff7ed] px-1.5 py-0.5 rounded border border-[#fed7aa] animate-pulse">
+                            RUNNING
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-[#78716c] pl-5.5">
+                          Action: Ingesting prompt context, evaluating knowledge base & executing sandbox tools.
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-[#78716c]">Egress:</span>{" "}
-                        <span className="text-[#16a34a] font-semibold">{activeTaskMeta.networkEgress}</span>
-                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#f0eae0] flex items-center justify-between text-[10px] text-[#78716c]">
+                      <span>Host: <strong className="text-[#1c1917]">{healthData?.ollama_backend?.endpoint || 'http://127.0.0.1:11434'}</strong></span>
+                      <span className="text-[#ea580c] font-semibold flex items-center">
+                        <Activity className="w-3 h-3 mr-1 animate-pulse" />
+                        Generating Sovereign Tokens...
+                      </span>
                     </div>
                   </div>
                 )}
@@ -1800,11 +1920,15 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => setRightPanelOpen(true)}
-                className="p-1.5 rounded-lg text-[#78716c] hover:text-[#ea580c] hover:bg-[#f4efe6] transition-colors"
-                title="Open Voice Dictation"
+                onClick={toggleVoiceInput}
+                className={`p-1.5 rounded-lg transition-all ${
+                  isListening
+                    ? 'bg-[#ea580c] text-white animate-pulse shadow-md'
+                    : 'text-[#78716c] hover:text-[#ea580c] hover:bg-[#f4efe6]'
+                }`}
+                title={isListening ? "Stop Voice Dictation (Listening...)" : "Click to Speak & Transcribe directly into chat"}
               >
-                <Mic className="w-4 h-4" />
+                <Mic className={`w-4 h-4 ${isListening ? 'animate-bounce' : ''}`} />
               </button>
 
               <button
@@ -1829,7 +1953,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 3. RIGHT SIDEBAR: DEDICATED DELIVERABLE INSPECTOR OR VOICE AGENT */}
+      {/* 3. RIGHT SIDEBAR: DEDICATED DELIVERABLE INSPECTOR */}
       <aside
         className={`${
           rightPanelOpen ? 'w-80 md:w-96' : 'w-0 translate-x-full'
@@ -1842,13 +1966,15 @@ export default function App() {
             onZoomImage={(imgUrl) => setExpandedImage(imgUrl)}
           />
         ) : (
-
-          <VoiceOrb
-            onVoiceInput={(spokenText) => {
-              setPrompt(spokenText);
-            }}
-            loading={loading}
-          />
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-[#78716c]">
+            <div className="w-12 h-12 rounded-xl bg-[#ede7dc] flex items-center justify-center mb-3">
+              <FileText className="w-6 h-6 text-[#a8a29e]" />
+            </div>
+            <div className="font-semibold text-xs text-[#1c1917] mb-1">Deliverables Inspector</div>
+            <p className="text-[11px] leading-relaxed max-w-xs text-[#78716c]">
+              Select any generated PowerPoint deck, Word document, or Excel spreadsheet from the chat to inspect its live slides, tables, or sections here.
+            </p>
+          </div>
         )}
       </aside>
 

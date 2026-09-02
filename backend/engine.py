@@ -1,532 +1,402 @@
+# Sovereign Multi-Turn ReAct Agent Engine with Tool Execution Loop
 import time
 import re
+import json
 import base64
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
-
-from .config import (
-    PPTX_TRIGGERS,
-    DOCX_TRIGGERS,
-    XLSX_TRIGGERS,
-)
 from .router import router, RoutingDecision
 from .inference import inference_engine
 from .network_guard import sentinel
-from .sandbox_executor import sandbox
-from .document_generator import doc_generator
-from .knowledge_base import knowledge_base
-from .multimodal_vision import vision_engine
+from .tools import tool_registry, ToolResult
+
+
+class AgentExecutionState:
+    """Maintains working memory, scratchpad, deliverables, and step telemetry across ReAct turns."""
+
+    def __init__(
+        self,
+        task_id: str,
+        prompt: str,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+    ):
+        self.task_id = task_id
+        self.prompt = prompt
+        self.attachments = attachments or []
+        self.history = history or []
+        self.scratchpad: str = ""
+        self.deliverables: List[Dict[str, Any]] = []
+        self.citations: List[Dict[str, Any]] = []
+        self.steps: List[Dict[str, Any]] = []
+        self.final_answer: str = ""
+        self.start_time: float = time.time()
+        self.step_counter: int = 1
+
+    def add_step(self, title: str, status: str, duration_ms: int, details: str):
+        self.steps.append({
+            "step_id": self.step_counter,
+            "step_number": self.step_counter,
+            "title": title,
+            "status": status,
+            "duration_ms": max(1, duration_ms),
+            "details": details,
+        })
+        self.step_counter += 1
+
+    def add_deliverables(self, new_deliverables: List[Dict[str, Any]]):
+        for d in new_deliverables:
+            if not any(existing.get("filename") == d.get("filename") for existing in self.deliverables):
+                self.deliverables.append(d)
+
+    def add_citations(self, new_citations: List[Dict[str, Any]]):
+        for c in new_citations:
+            if not any(
+                existing.get("doc_id") == c.get("doc_id") and existing.get("chunk_index") == c.get("chunk_index")
+                for existing in self.citations
+            ):
+                self.citations.append(c)
 
 
 class SovereignAgentEngine:
-    """Orchestrates routing, RAG retrieval, LLM reasoning, code sandbox, and document generation."""
+    """
+    True ReAct (Reasoning + Acting) Agent Engine for KAVACH-AI Sovereign Workbench.
+    Maintains state across multi-turn thought-action-observation cycles with tool calling & direct Q&A.
+    """
 
-    def __init__(self):
+    def __init__(self, max_iterations: int = 6):
         self.router = router
         self.inference = inference_engine
         self.sentinel = sentinel
+        self.tool_registry = tool_registry
+        self.max_iterations = max_iterations
 
+    # -------------------------------------------------------------------------
+    # Response Parsing (ReAct Action, JSON Schema, or Plain Text)
+    # -------------------------------------------------------------------------
 
-
-    # Parsing Helpers
-
-    def _extract_python_code(self, text: str) -> Optional[str]:
-        """Extracts python code block from text if present."""
-        match = re.search(r"```(?:python)?\s*\n(.*?)```", text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
+    def _parse_json(self, raw: str) -> Optional[Dict[str, Any]]:
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", raw.strip())
+        cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(cleaned[start:end + 1])
+            except Exception:
+                pass
         return None
 
-    def _extract_clean_topic(self, prompt: str) -> str:
-        """Extracts a readable topic title from the user prompt."""
-        cleaned = prompt
-        # Remove common introductory words
-        for remove_word in [
-            "please", "can you", "generate", "create", "draft", "make",
-            "build", "write", "provide", "a powerpoint", "powerpoint",
-            "a presentation", "slides", "a word document", "word doc",
-            "an excel sheet", "spreadsheet", "report", "memo"
-        ]:
-            cleaned = re.sub(rf"(?i)\b{remove_word}\b", "", cleaned)
+    def _extract_pure_python_code(self, text: str) -> Optional[str]:
+        matches = re.findall(r"```(?:python|py)\s*\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
+        for m in matches:
+            code = m.strip()
+            if not code.startswith("{") and any(k in code for k in ["import ", "plt.", "np.", "def ", "print(", "=", "for ", "while "]):
+                return code
+        return None
 
-        cleaned = re.sub(r"\s+", " ", cleaned).strip(" :,-_")
-        if len(cleaned) > 4:
-            return cleaned[:50].title()
-        return "Technical Assessment"
+    def _parse_markdown_table(self, text: str) -> Optional[Tuple[List[str], List[List[Any]]]]:
+        lines = [l.strip() for l in text.split("\n") if l.strip().startswith("|") and l.strip().endswith("|")]
+        if len(lines) >= 3:
+            headers = [c.strip() for c in lines[0].strip("|").split("|")]
+            rows = []
+            for line in lines[2:]:
+                cells = [c.strip() for c in line.strip("|").split("|")]
+                if len(cells) == len(headers):
+                    parsed = []
+                    for val in cells:
+                        try:
+                            parsed.append(float(val) if "." in val else int(val))
+                        except ValueError:
+                            parsed.append(val)
+                    rows.append(parsed)
+            if headers and rows:
+                return headers, rows
+        return None
 
-    def _parse_slides_from_text(self, text: str, fallback_title: str) -> List[Dict[str, Any]]:
-        """Parses slide titles and bullets from markdown text using line-by-line inspection."""
-        slides = []
-        current_title = ""
-        current_bullets = []
+    def _parse_markdown_sections(self, text: str) -> List[Dict[str, str]]:
+        clean_text = re.sub(r"(?i)^(Thought|Action|Action Input|Observation):.*?\n", "", text, flags=re.MULTILINE).strip()
+        sections = []
+        current_heading = "Executive Summary"
+        current_lines = []
 
-        lines = text.split("\n")
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                continue
+        for line in clean_text.split("\n"):
+            if re.match(r"^#{1,3}\s+", line):
+                if current_lines:
+                    content = "\n".join(current_lines).strip()
+                    if content:
+                        sections.append({"heading": current_heading, "content": content})
+                    current_lines = []
+                current_heading = re.sub(r"^#{1,3}\s+", "", line).replace("**", "").strip()
+            else:
+                current_lines.append(line)
 
-            # Check if line is a slide title or markdown header
-            is_slide_header = (
-                stripped.lower().startswith("slide ") or
-                stripped.startswith("#") or
-                stripped.startswith("**Slide")
-            )
+        if current_lines:
+            content = "\n".join(current_lines).strip()
+            if content:
+                sections.append({"heading": current_heading, "content": content})
 
-            if is_slide_header:
-                if current_title and current_bullets:
-                    slides.append({"title": current_title, "bullets": current_bullets[:5]})
-                clean_title = re.sub(r"^[#\*\s\-–—]+", "", stripped)
-                clean_title = re.sub(r"^Slide\s*\d+[\s:\-–—]*", "", clean_title, flags=re.IGNORECASE)
-                current_title = clean_title.replace("**", "").strip() or fallback_title
-                current_bullets = []
-            elif stripped.startswith(("-", "*", "•")):
-                bullet = re.sub(r"^[\-\*•\d\.]+\s*", "", stripped).replace("**", "").strip()
-                if bullet:
-                    current_bullets.append(bullet)
+        return sections or [{"heading": "Technical Assessment", "content": clean_text or "Assessment completed."}]
 
-        if current_title and current_bullets:
-            slides.append({"title": current_title, "bullets": current_bullets[:5]})
+    def _extract_all_actions(self, text: str) -> List[Tuple[str, Dict[str, Any]]]:
+        """Extracts all (action_name, args_dict) pairs when the model calls tools."""
+        actions = []
+        pattern = r"(?:\*\*)?Action:?(?:\*\*)?\s*`?([a-zA-Z0-9_\-]+)`?\s*(?:(?:\*\*)?(?:Action Input|Code|Input):?(?:\*\*)?\s*)?(.*?)(?=(?:\*\*)?Action:|$)"
+        matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+        for act_name, raw_args in matches:
+            act_clean = act_name.strip()
+            if act_clean in self.tool_registry._tools:
+                args = self._parse_json(raw_args) or {}
+                if act_clean == "execute_python_code" and not args.get("code"):
+                    from .document_generator.code_extraction import extract_code
+                    ext_res = extract_code(raw_args)
+                    if not ext_res.code or not ext_res.valid_syntax:
+                        ext_res = extract_code(text)
+                    if ext_res and ext_res.code:
+                        args["code"] = ext_res.code
+                actions.append((act_clean, args))
+        return actions
 
-        if not slides:
-            slides.append({
-                "title": fallback_title,
-                "bullets": ["Technical Assessment Summary", "Engineering Verification & Findings"],
-            })
+    def _parse_react_response(self, text: str) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]], Optional[str]]:
+        """Parses model response into (thought, action, action_input, final_answer)."""
+        # 1. Multi-action or single explicit ReAct Action
+        actions = self._extract_all_actions(text)
+        if actions:
+            thought_match = re.search(r"(?:\*\*)?Thought:?(?:\*\*)?\s*(.*?)(?=(?:\*\*)?Action:)", text, re.DOTALL | re.IGNORECASE)
+            thought = thought_match.group(1).strip() if thought_match else text.split("Action:")[0].strip()
+            return thought, actions[0][0], actions[0][1], None
 
-        return slides
+        final_match = re.search(r"(?:\*\*)?Final Answer:?(?:\*\*)?\s*(.*)", text, re.DOTALL | re.IGNORECASE)
 
+        # 2. Final Answer only (no registered tool action)
+        if final_match:
+            thought_match = re.search(r"(?:\*\*)?Thought:?(?:\*\*)?\s*(.*?)(?=(?:\*\*)?Final Answer:)", text, re.DOTALL | re.IGNORECASE)
+            return (thought_match.group(1).strip() if thought_match else None), None, None, final_match.group(1).strip()
 
-    # Execution Sub-Steps
+        # 3. Direct Structured JSON payload (schemas)
+        json_payload = self._parse_json(text)
+        if json_payload and isinstance(json_payload, dict):
+            thought = text.split("```")[0].strip() or "Processing structured request."
+            for k in ["final_answer", "answer", "response", "summary"]:
+                if k in json_payload and isinstance(json_payload[k], str):
+                    return thought, None, None, json_payload[k].strip()
 
-    def _handle_attachments(
-        self, attachments: List[Dict[str, Any]]
-    ) -> tuple[List[Dict[str, Any]], str, List[str], Optional[Dict[str, Any]]]:
-        """Processes attached files, extracts base64 images for vision, text from docs, and builds step telemetry."""
-        if not attachments:
-            return [], "", [], None
+            if "action" in json_payload and json_payload["action"] in self.tool_registry._tools:
+                return thought, json_payload["action"], json_payload.get("action_input", json_payload), None
+            if "headers" in json_payload and "rows" in json_payload:
+                return thought, "generate_excel_spreadsheet", json_payload, None
+            if "slides" in json_payload:
+                return thought, "generate_powerpoint_presentation", json_payload, None
+            if "sections" in json_payload:
+                return thought, "generate_word_document", json_payload, None
+            if "code" in json_payload and isinstance(json_payload["code"], str):
+                return thought, "execute_python_code", json_payload, None
 
-        step_start = time.time()
-        attached_citations = []
-        attached_texts = []
-        processed_files = []
-        b64_images = []
+        # 4. Pure Python Code Block (only when explicit code tags used)
+        py_code = self._extract_pure_python_code(text)
+        if py_code:
+            thought = text.split("```")[0].strip() or "Executing Python sandbox calculation."
+            return thought, "execute_python_code", {"code": py_code}, None
 
-        for att in attachments:
+        # 5. Direct Text Response Fallback (Plain Text / Q&A)
+        return None, None, None, text.strip()
+
+    # -------------------------------------------------------------------------
+    # System Prompt & Attachments
+    # -------------------------------------------------------------------------
+
+    def _build_system_prompt(self, decision: RoutingDecision, attached_text: str = "") -> str:
+        tools_doc = self.tool_registry.get_tool_prompt_description()
+        prompt = (
+            f"You are KAVACH-AI, a sovereign industrial engineering assistant operating on-premises.\n"
+            f"Domain: {decision.task_category} (Persona: {decision.model_name})\n\n"
+            f"AVAILABLE TOOLS:\n{tools_doc}\n\n"
+            f"STRICT BEHAVIORAL RULES:\n"
+            f"1. DEFAULT TO PLAIN TEXT: For greetings, general chat, explanations, standards discussions, and conceptual inquiries, ALWAYS respond directly in plain text. NEVER create any files, documents, or spreadsheets unless explicitly asked.\n"
+            f"2. NO UNPROMPTED DELIVERABLES: NEVER call `generate_word_document`, `generate_powerpoint_presentation`, or `generate_excel_spreadsheet` unless the user's current request explicitly asks to generate or create a document, presentation, or spreadsheet.\n"
+            f"3. KNOWLEDGE BASE SEARCH: Call `search_knowledge_base` only when domain technical standards, specifications, or formulas are needed to answer the query.\n"
+            f"4. PYTHON CODE EXECUTION: When writing Python with `execute_python_code`, always include a function call with `print(...)` so the calculation result is outputted and verified in the sandbox.\n"
+            f"5. REACT TOOL INVOCATION FORMAT (ONLY WHEN USING A TOOL):\n"
+            f"   Thought: <brief reasoning for using tool>\n"
+            f"   Action: <exact tool name>\n"
+            f"   Action Input: <valid JSON arguments, e.g. {{\"code\": \"def solve(): ...\\nprint(solve())\"}}>\n"
+            f"   (STOP immediately after Action Input and wait for Observation)\n"
+            f"6. FINAL SYNTHESIS:\n"
+            f"   Final Answer: <clean final summary and explanation in plain text>"
+        )
+        if attached_text:
+            prompt += f"\n\nATTACHED USER DOCUMENTS:\n{attached_text}"
+        return prompt
+
+    def _process_attachments(self, state: AgentExecutionState) -> Tuple[str, List[str]]:
+        if not state.attachments:
+            return "", []
+
+        t_start = time.time()
+        texts, b64_images, names = [], [], []
+        from .knowledge_base import knowledge_base
+        from .multimodal_vision import vision_engine
+
+        for att in state.attachments:
             name = att.get("name") or att.get("filename") or "attachment"
             path = att.get("local_path") or att.get("path")
-            processed_files.append(name)
-
+            names.append(name)
             if path and path.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 try:
-                    with open(path, "rb") as img_file:
-                        b64 = base64.b64encode(img_file.read()).decode("utf-8")
-                        b64_images.append(b64)
-                except Exception as e:
+                    with open(path, "rb") as f:
+                        b64_images.append(base64.b64encode(f.read()).decode("utf-8"))
+                except Exception:
                     pass
-
                 info = vision_engine.inspect_image_file(path)
                 if info.get("success"):
-                    attached_texts.append(f"[Image Attachment: {name}, Resolution: {info['image_info']['width']}x{info['image_info']['height']}]")
+                    m = info["image_info"]
+                    texts.append(f"[Visual Attachment: {name}, {m.get('width')}x{m.get('height')}, {m.get('format')}]")
             elif path:
                 try:
                     txt = knowledge_base.extract_text_from_file(path)
                     if txt:
-                        attached_texts.append(f"--- ATTACHMENT: {name} ---\n{txt[:1500]}")
-                        attached_citations.append({
-                            "doc_id": "ATTACHMENT",
-                            "title": name,
-                            "filename": name,
-                            "chunk_index": 1,
-                            "total_chunks": 1,
-                            "excerpt": txt[:250] + "...",
-                            "full_content": txt,
-                            "relevance_score": 1.0,
-                        })
+                        texts.append(f"--- ATTACHMENT: {name} ---\n{txt[:2000]}")
+                        state.add_citations([{"doc_id": "USER_ATTACHMENT", "title": name, "filename": name, "chunk_index": 1, "total_chunks": 1, "excerpt": txt[:250] + "...", "full_content": txt, "relevance_score": 1.0}])
                 except Exception:
                     pass
 
-        elapsed_ms = int((time.time() - step_start) * 1000)
-        step = {
-            "step_id": 2,
-            "title": "Local File Ingestion & Parsing",
-            "status": "COMPLETED",
-            "duration_ms": max(1, elapsed_ms),
-            "details": f"Processed {len(attachments)} user attachment(s): {', '.join(processed_files)} (Base64 Vision Payload Attached: {len(b64_images)} image(s)).",
-        }
-
-        return attached_citations, "\n\n".join(attached_texts), b64_images, step
-
-    def _should_perform_rag(self, prompt_lower: str, decision: RoutingDecision, has_images: bool = False) -> bool:
-        """Determines if query requires RAG knowledge base search based on intent and grounding need."""
-        # If user uploaded an image and asks a purely generic question (e.g. "whats this"), skip RAG
-        if has_images and not any(k in prompt_lower for k in ["asme", "api", "standard", "gfr", "sop", "manual", "corrosion", "thickness", "compliance", "regulation", "drawing", "p&id", "schematic", "reference", "refer", "plant", "asset"]):
-            return False
-
-        # All governance, compliance, document RAG, and deliverable tasks
-        if decision.task_category in ["STANDARDS_AND_GOVERNANCE_REASONING", "DOCUMENT_RAG_ANALYSIS", "ENTERPRISE_DELIVERABLE_SYNTHESIS"]:
-            return True
-
-        from .config import STANDARDS_AND_GOVERNANCE_TRIGGERS
-        if any(k in prompt_lower for k in STANDARDS_AND_GOVERNANCE_TRIGGERS):
-            return True
-
-
-        rag_keywords = [
-            # Standards & Regulatory
-            "standard", "sop", "manual", "compliance", "rule", "policy", 
-            "regulation", "clause", "section", "annexure", "guideline", 
-            "procedure", "handbook", "spec", "specification",
-            # References & Grounding in past data / organizational correspondence
-            "reference", "refer", "based on", "according to", "ground", 
-            "past", "record", "correspondence", "history", "audit", 
-            "tender", "turnaround", "inspection", "finding", "compare to last year", 
-            "last year", "previous", "knowledge base",
-            # Industrial Assets, Formulas & Calculations (including for coding)
-            "pressure vessel", "heat exchanger", "boiler", "pipeline", "piping", 
-            "valve", "corrosion", "thickness", "wall thickness", "lmtd", 
-            "allowable stress", "joint efficiency", "hydrotest", "weld", "flange", 
-            "pump", "compressor", "turbine", "column", "reactor", "storage tank", 
-            "safety valve", "interlock", "refinery", "power plant", "formula", 
-            "equation", "derivation", "heat duty", "flow rate"
-        ]
-        return any(k in prompt_lower for k in rag_keywords)
-
-
-    def _perform_rag_retrieval(
-        self, prompt: str
-    ) -> tuple[List[Dict[str, Any]], str, Optional[Dict[str, Any]]]:
-        """Searches local knowledge base and constructs RAG context with clear query telemetry."""
-        step_start = time.time()
-        citations = knowledge_base.search(prompt, top_k=3)
-        elapsed_ms = int((time.time() - step_start) * 1000)
-
-        if not citations:
-            return [], "", None
-
-        rag_snippets = []
-        for c in citations:
-            c["query"] = prompt
-            rag_snippets.append(f"[{c['title']} - Chunk {c['chunk_index']}]:\n{c['full_content']}")
-
-        rag_context = "\n\n".join(rag_snippets)
-        unique_titles = ", ".join(list(dict.fromkeys(c["title"] for c in citations)))
-        step = {
-            "step_id": 3,
-            "title": "Local RAG Standards Retrieval",
-            "status": "COMPLETED",
-            "duration_ms": max(1, elapsed_ms),
-            "details": f"Queried Knowledge Base with: '{prompt}' -> Retrieved {len(citations)} chunk(s) from: {unique_titles}.",
-        }
-
-        return citations, rag_context, step
-
-
-    def _build_system_prompt(
-        self,
-        decision: RoutingDecision,
-        attached_text: str,
-        rag_context: str,
-    ) -> str:
-        """Constructs system prompt containing sovereign context and guidelines."""
-        parts = [
-            "You are KAVACH-AI, a local sovereign industrial engineering assistant.",
-            f"Assigned Task Category: {decision.task_category}",
-            "Operating Guidelines:",
-            "- Respond clearly with rigorous technical engineering analysis.",
-            "- Code & Visualizations: When generating Python simulations or Matplotlib plots, write fully valid and executable code. Ensure matching array dimensions when calling plt.plot(x, y). For single threshold or limit markers (e.g. t_min, allowable stress, setpoint), use `plt.axvline(x=val, color='red', linestyle='--', label='Limit')` or matching 2D array pairs `plt.plot([val, val], [y_min, y_max])`. Always put executable Python code in a ```python ... ``` block.",
-        ]
-
-        if attached_text:
-            parts.append(f"\nUser Attached Documents:\n{attached_text}")
-
-        if rag_context:
-            parts.append(f"\nGoverning Standards & Knowledge Base Context:\n{rag_context}")
-
-        return "\n\n".join(parts)
-
-    def _run_sandbox_if_code_present(
-        self, raw_response: str, model_id: Optional[str] = None
-    ) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], str]:
-        """Extracts and runs Python code in isolated sandbox if detected, with iterative self-healing."""
-        code = self._extract_python_code(raw_response)
-        if not code:
-            return [], None, raw_response
-
-        step_start = time.time()
-        res = sandbox.execute(code, script_name_prefix="exec_sim")
-
-        healed = False
-        # Agentic Self-Healing Iteration if execution failed
-        if not res["success"] and model_id and res.get("stderr"):
-            err_snippet = res["stderr"].strip()[-1000:]
-            retry_prompt = f"""You wrote Python code that failed with an execution error in the local sandbox.
-Execution Error Traceback:
-```
-{err_snippet}
-```
-Failed Code:
-```python
-{code}
-```
-DIAGNOSIS & REPAIR DIRECTIVES:
-1. If using Matplotlib to mark a threshold or single value (like t_min, allowable stress, or a target level), use `plt.axvline(x=t_min, color='red', linestyle='--', label='Limit')` or pass matching array shapes like `plt.plot([t_min, t_min], [0, 1])`. Never pass a single scalar and an array together into plt.plot().
-2. Ensure all imports (e.g. numpy, matplotlib.pyplot) and variable dimensions are completely valid and executable.
-3. Output the repaired, working Python script inside a single ```python ... ``` block."""
-
-            try:
-                repair_res = self.inference.generate(retry_prompt, model_id=model_id)
-                if repair_res.get("success"):
-                    repaired_code = self._extract_python_code(repair_res.get("response", ""))
-                    if repaired_code and repaired_code != code:
-                        res2 = sandbox.execute(repaired_code, script_name_prefix="exec_sim_repaired")
-                        if res2["success"]:
-                            res = res2
-                            raw_response = raw_response.replace(code, repaired_code)
-                            code = repaired_code
-                            healed = True
-            except Exception:
-                pass
-
-        elapsed_ms = int((time.time() - step_start) * 1000)
-
-        status = "COMPLETED" if res["success"] else "WARNING"
-        details = f"Code executed in {res['elapsed_seconds']}s (Exit code: {res['exit_code']})."
-        if healed:
-            details += " [Self-healed & verified on Iteration 2]"
-
-        step = {
-            "step_id": 5,
-            "title": "Sandboxed Python Execution & Verification",
-            "status": status,
-            "duration_ms": max(1, elapsed_ms),
-            "details": details,
-        }
-
-        deliverables = []
-        for plot in res.get("plots", []):
-            deliverables.append({
-                "type": "plot",
-                "file_type": "png",
-                "filename": plot["filename"],
-                "path": plot["path"],
-                "title": plot["title"],
-                "format": "PNG Image",
-            })
-
-        deliverables.append({
-            "type": "code",
-            "file_type": "py",
-            "filename": res["script_filename"],
-            "path": res["script_path"],
-            "title": "Executed Python Simulation",
-            "format": "Python Script",
-            "code": code,
-            "stdout": res["stdout"],
-            "stderr": res["stderr"],
-        })
-
-        return deliverables, step, raw_response
-
-
-    def _generate_requested_documents(
-        self,
-        prompt_lower: str,
-        topic_title: str,
-        raw_response: str,
-        decision: RoutingDecision,
-    ) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
-        """Generates Office documents (.docx, .pptx, .xlsx) requested by user prompt."""
-        deliverables = []
-        step_start = time.time()
-
-        # Word Document
-        if any(k in prompt_lower for k in DOCX_TRIGGERS) or decision.task_category == "STANDARDS_AND_GOVERNANCE_REASONING":
-            paragraphs = [p.strip() for p in raw_response.split("\n\n") if len(p.strip()) > 30][:6]
-            if not paragraphs:
-                paragraphs = [raw_response[:800]]
-            doc_res = doc_generator.generate_custom_word_doc(topic_title, prompt_lower[:100], paragraphs)
-            deliverables.append({
-                "type": "document",
-                "file_type": "docx",
-                "filename": doc_res["filename"],
-                "path": doc_res["path"],
-                "title": doc_res["title"],
-                "subject": prompt_lower[:100],
-                "paragraphs": paragraphs,
-                "format": "Word Document (.docx)",
-                "size_bytes": doc_res["size_bytes"],
-            })
-
-        # PowerPoint Presentation
-        if any(k in prompt_lower for k in PPTX_TRIGGERS):
-            slides_data = self._parse_slides_from_text(raw_response, topic_title)
-            pptx_res = doc_generator.generate_custom_powerpoint(topic_title, "Technical Presentation", slides_data)
-            deliverables.append({
-                "type": "presentation",
-                "file_type": "pptx",
-                "filename": pptx_res["filename"],
-                "path": pptx_res["path"],
-                "title": pptx_res["title"],
-                "subtitle": "Technical Presentation",
-                "slides": slides_data,
-                "format": "PowerPoint Deck (.pptx)",
-                "size_bytes": pptx_res["size_bytes"],
-            })
-
-        # Excel Spreadsheet
-        if any(k in prompt_lower for k in XLSX_TRIGGERS):
-            headers = ["Item", "Parameter", "Value", "Unit", "Compliance Status"]
-            rows = [
-                ["PARAM-1", "Design Operating Pressure", 18.5, "bar", "VERIFIED"],
-                ["PARAM-2", "Operating Temperature", 350.0, "°C", "VERIFIED"],
-                ["PARAM-3", "Calculated Corrosion Rate", 0.42, "mm/year", "FLAGGED"],
-                ["PARAM-4", "Estimated Remaining Life", 4.8, "years", "ACCEPTABLE"],
-            ]
-            xlsx_res = doc_generator.generate_custom_excel(topic_title, None, rows)
-            deliverables.append({
-                "type": "spreadsheet",
-                "file_type": "xlsx",
-                "filename": xlsx_res["filename"],
-                "path": xlsx_res["path"],
-                "title": xlsx_res["title"],
-                "headers": headers,
-                "rows": rows,
-                "format": "Excel Workbook (.xlsx)",
-                "size_bytes": xlsx_res["size_bytes"],
-            })
-
-
-        if not deliverables:
-            return [], None
-
-        elapsed_ms = int((time.time() - step_start) * 1000)
-        step = {
-            "step_id": 6,
-            "title": "Industrial Deliverable Synthesis",
-            "status": "COMPLETED",
-            "duration_ms": max(1, elapsed_ms),
-            "details": f"Generated {len(deliverables)} styled Office file(s).",
-        }
-
-        return deliverables, step
+        elapsed_ms = int((time.time() - t_start) * 1000)
+        state.add_step("Local File Ingestion & Parsing", "COMPLETED", elapsed_ms, f"Ingested {len(state.attachments)} attachment(s): {', '.join(names)}.")
+        return "\n\n".join(texts), b64_images
 
     # -------------------------------------------------------------------------
-    # Main Task Execution Pipeline
+    # ReAct Multi-Turn Execution Loop
     # -------------------------------------------------------------------------
+
     def execute_task(
         self,
         prompt: str,
-        attachments: List[Dict[str, Any]] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
         override_model: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
-        """Runs the complete sovereign task workflow."""
         start_time = time.time()
         task_id = f"TASK-{int(start_time * 1000)}"
-        attachments = attachments or []
-        steps = []
-        all_citations = []
-        all_deliverables = []
+        state = AgentExecutionState(task_id, prompt, attachments, history)
 
-        # 1. Routing
+        # 1. Routing & System Prompt
         r_start = time.time()
         decision = self.router.route_task(prompt, attachments)
-        r_elapsed_ms = int((time.time() - r_start) * 1000)
-        steps.append({
-            "step_id": 1,
-            "title": "Intent Classification & Task Routing",
-            "status": "COMPLETED",
-            "duration_ms": max(1, r_elapsed_ms),
-            "details": f"Classified as '{decision.task_category}'. Dispatched to {decision.model_name}.",
-        })
-
-        # 2. Attachments
-        att_citations, att_text, b64_images, att_step = self._handle_attachments(attachments)
-        if att_step:
-            steps.append(att_step)
-        all_citations.extend(att_citations)
-
-        # 3. RAG Lookup (Selective & Intent-Based)
-        has_images = len(b64_images) > 0
-        prompt_lower = prompt.lower()
-        if self._should_perform_rag(prompt_lower, decision, has_images=has_images):
-            rag_citations, rag_context, rag_step = self._perform_rag_retrieval(prompt)
-            if rag_step:
-                steps.append(rag_step)
-            all_citations.extend(rag_citations)
-        else:
-            rag_citations, rag_context, rag_step = [], "", None
-
-        # 4. LLM Generation
-        sys_prompt = self._build_system_prompt(decision, att_text, rag_context)
-        gen_start = time.time()
-        llm_result = self.inference.generate(
-            prompt=prompt,
-            model_id=override_model or decision.selected_model_id,
-            system_prompt=sys_prompt,
-            history=history,
-            images=b64_images if b64_images else None,
+        state.add_step(
+            "Intent Classification & Persona Dispatch", "COMPLETED", int((time.time() - r_start) * 1000),
+            f"Classified as '{decision.task_category}'. Dispatched: {decision.model_name}.",
         )
 
-        gen_elapsed_ms = int((time.time() - gen_start) * 1000)
-        steps.append({
-            "step_id": 4,
-            "title": f"Local Foundation Model Inference ({llm_result.get('model_used', 'Ollama')})",
-            "status": "COMPLETED" if llm_result["success"] else "WARNING",
-            "duration_ms": max(1, gen_elapsed_ms),
-            "details": "Generated technical reasoning and directives." if llm_result["success"] else "Ollama returned warning or offline message.",
-        })
+        attached_text, b64_images = self._process_attachments(state)
+        target_model = override_model or decision.selected_model_id
+        sys_prompt = self._build_system_prompt(decision, attached_text)
 
-        raw_response = llm_result.get("response", "")
-        effective_model = override_model or decision.selected_model_id
+        for turn in range(1, self.max_iterations + 1):
+            t_start = time.time()
+            if turn == 1:
+                turn_prompt = f"User Request: {state.prompt}\n\nRespond directly in plain text or use Thought/Action if tools are needed."
+            else:
+                turn_prompt = (
+                    f"User Request: {state.prompt}\n\n"
+                    f"Working Memory & Tool Observations:\n{state.scratchpad}\n\n"
+                    f"Based on the Observations, execute the next tool or conclude with 'Final Answer:'."
+                )
 
-        # 5. Sandbox Code Execution (with Self-Healing Iteration)
-        code_deliverables, code_step, raw_response = self._run_sandbox_if_code_present(raw_response, model_id=effective_model)
-        if code_step:
-            steps.append(code_step)
-        all_deliverables.extend(code_deliverables)
+            llm_res = self.inference.generate(
+                prompt=turn_prompt,
+                model_id=target_model,
+                system_prompt=sys_prompt,
+                history=state.history if turn == 1 else None,
+                images=b64_images if b64_images else None,
+            )
+            raw = llm_res.get("response", "")
+            if not llm_res.get("success"):
+                state.final_answer = raw
+                state.add_step(f"Inference Turn {turn} (Offline)", "WARNING", int((time.time() - t_start) * 1000), "Inference engine offline.")
+                break
 
+            # 1. Multi-action or single Action execution in this turn
+            actions = self._extract_all_actions(raw)
+            if actions:
+                for act_name, act_args in actions:
+                    tool_res = self.tool_registry.execute_tool(act_name, act_args)
+                    if tool_res.deliverables:
+                        state.add_deliverables(tool_res.deliverables)
+                    if tool_res.citations:
+                        state.add_citations(tool_res.citations)
 
-        # 6. Deliverable Generation
-        topic = self._extract_clean_topic(prompt)
-        doc_deliverables, doc_step = self._generate_requested_documents(prompt.lower(), topic, raw_response, decision)
-        if doc_step:
-            steps.append(doc_step)
-        all_deliverables.extend(doc_deliverables)
+                    state.scratchpad += f"Action: {act_name}\nAction Input: {json.dumps(act_args)}\nObservation: {tool_res.output}\n\n"
+                    summary = f"Tool '{act_name}' executed in {tool_res.duration_ms}ms."
+                    if tool_res.deliverables:
+                        summary += f" Produced: {', '.join(d['filename'] for d in tool_res.deliverables)}."
+                    state.add_step(f"ReAct Turn {turn}: Tool `{act_name}`", "COMPLETED" if tool_res.success else "WARNING", int((time.time() - t_start) * 1000), summary)
+
+                # Check if model also finished with Final Answer in same response
+                final_match = re.search(r"(?:\*\*)?Final Answer:?(?:\*\*)?\s*(.*)", raw, re.DOTALL | re.IGNORECASE)
+                if final_match:
+                    state.final_answer = final_match.group(1).strip()
+                    break
+                # If only 1 tool was executed and more might be needed, continue to next turn of ReAct loop!
+                continue
+
+            thought, action, action_input, final_answer = self._parse_react_response(raw)
+
+            if final_answer is not None:
+                state.final_answer = final_answer
+                state.add_step(f"ReAct Turn {turn}: Direct Response", "COMPLETED", int((time.time() - t_start) * 1000), thought or "Response generated.")
+                break
+            else:
+                # Direct plain-text response (informational / Q&A)
+                state.final_answer = raw
+                state.add_step(f"ReAct Turn {turn}: Direct Response", "COMPLETED", int((time.time() - t_start) * 1000), "Generated direct response.")
+                break
+
+        if not state.final_answer:
+            if state.deliverables:
+                files_list = ", ".join(f"`{d.get('filename')}`" for d in state.deliverables)
+                state.final_answer = f"Task completed successfully. Generated {len(state.deliverables)} deliverable(s): {files_list}."
+            else:
+                clean_scratchpad = re.sub(r"(?i)^(Thought|Action|Action Input|Observation):.*?\n", "", state.scratchpad, flags=re.MULTILINE).strip()
+                state.final_answer = clean_scratchpad or "Task execution completed."
+
+        if state.final_answer:
+            # Clean generic ReAct prefix tags if left over in output
+            cleaned = re.sub(r"(?i)^\s*(?:Thought|Action|Action Input|Observation):\s*", "", state.final_answer, flags=re.MULTILINE).strip()
+            cleaned = re.sub(r"(?i)^\s*Final Answer:\s*", "", cleaned).strip()
+            cleaned = re.sub(r"^<(?:text|response|output|clean response in plain text)>\s*", "", cleaned, flags=re.IGNORECASE).strip()
+            if cleaned and not cleaned.lower().startswith("none"):
+                state.final_answer = cleaned
 
         total_elapsed_ms = int((time.time() - start_time) * 1000)
 
-        # Audit Event
+        # Record SHA-256 Audit Event
         audit_event = self.sentinel.record_audit_event(
             event_type="TASK_EXECUTED",
             severity="INFO",
-            details=f"Executed task {task_id} ({decision.task_category}).",
-            metadata={"task_id": task_id, "duration_ms": total_elapsed_ms},
+            details=f"Executed task {task_id} with {len(state.deliverables)} deliverable(s).",
+            metadata={"task_id": task_id, "duration_ms": total_elapsed_ms, "deliverables": len(state.deliverables)},
         )
 
         return {
             "task_id": task_id,
             "prompt": prompt,
             "routing": decision.model_dump(),
-            "final_answer": raw_response,
-            "summary": raw_response,
-            "steps": steps,
-            "citations": all_citations,
-            "deliverables": all_deliverables,
-            "artifacts": all_deliverables,
+            "final_answer": state.final_answer,
+            "summary": state.final_answer,
+            "steps": state.steps,
+            "citations": state.citations,
+            "deliverables": state.deliverables,
+            "artifacts": state.deliverables,
+            "scratchpad": state.scratchpad,
             "total_execution_ms": total_elapsed_ms,
             "elapsed_seconds": round(total_elapsed_ms / 1000.0, 3),
             "sovereign_proof": {
                 "air_gap_enforced": True,
                 "air_gap_verified": True,
                 "outbound_bytes": 0,
-                "local_inference_model": llm_result.get("model_used"),
+                "local_inference_model": target_model,
                 "audit_hash": audit_event["event_hash"],
             },
         }
 
 
-# Shared agent engine instance
 agent_engine = SovereignAgentEngine()
-

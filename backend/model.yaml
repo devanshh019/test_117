@@ -1,27 +1,24 @@
 models:
-  - id: gemma3:4b
-    name: Gemma 3 4B Sovereign Standards & Governance
-    default: true
-    capabilities:
-      - STANDARDS_AND_GOVERNANCE_REASONING
-      - DOCUMENT_RAG_ANALYSIS
-      - GENERAL_ENGINEERING_REASONING
-
-  - id: gemma3:4b
-    name: Mistral 7B Enterprise Deliverable Synthesizer
-    default: false
-    capabilities:
-      - ENTERPRISE_DELIVERABLE_SYNTHESIS
-
-  - id: qwen2.5:0.5b
-    name: Qwen 2.5 Coder Internal Tool Specialist
-    default: false
-    capabilities:
-      - ENGINEERING_MATH_AND_CODE
-      - CODING_AND_INTERNAL_TOOLS
-
-  - id: gemma3:4b
-    name: LLaVA 7B Multimodal Vision & Drawing Inspector
-    default: false
-    capabilities:
-      - MULTIMODAL_IMAGE_INSPECTION
+- id: qwen3:8b
+  name: Gemma 3 4B Sovereign Standards & Governance
+  default: true
+  capabilities:
+  - STANDARDS_AND_GOVERNANCE_REASONING
+  - DOCUMENT_RAG_ANALYSIS
+  - GENERAL_ENGINEERING_REASONING
+- id: qwen3:8b
+  name: Mistral 7B Enterprise Deliverable Synthesizer
+  default: false
+  capabilities:
+  - ENTERPRISE_DELIVERABLE_SYNTHESIS
+- id: qwen3:8b
+  name: Qwen 2.5 Coder Internal Tool Specialist
+  default: false
+  capabilities:
+  - ENGINEERING_MATH_AND_CODE
+  - CODING_AND_INTERNAL_TOOLS
+- id: qwen3:8b
+  name: LLaVA 7B Multimodal Vision & Drawing Inspector
+  default: false
+  capabilities:
+  - MULTIMODAL_IMAGE_INSPECTION

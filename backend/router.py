@@ -1,3 +1,4 @@
+# Semantic Intent Classifier and Model Persona Router
 from typing import Dict, List, Any, Optional
 import numpy as np
 from pydantic import BaseModel
@@ -16,18 +17,18 @@ class RoutingDecision(BaseModel):
     routing_reasons: List[str]
 
 
-# Semantic Domain Descriptions for Vector Matching (Zero Hardcoding)
+# Pure Semantic Vector Centroids for Cosine Similarity (Zero Hardcoding)
 CATEGORY_DESCRIPTIONS = {
-    "MULTIMODAL_IMAGE_INSPECTION": "Visual image, scanned PDF drawing, P&ID diagram, engineering blueprint, schematic, photograph inspection, OCR, control valve bypass.",
-    "ENTERPRISE_DELIVERABLE_SYNTHESIS": "Generating Office deliverables, formal Word approval notes (.docx), PowerPoint slide presentation decks (.pptx), and Excel calculation spreadsheets (.xlsx).",
-    "STANDARDS_AND_GOVERNANCE_REASONING": "Auditing compliance against ASME Boiler and Pressure Vessel Code, API 510/570 inspection standards, GFR-2017 procurement rules, tender evaluations, turnaround reports, and regulatory plant governance.",
-    "ENGINEERING_MATH_AND_CODE": "Mathematical calculations, numerical formulas, algebra, calculus, differential equations, physics equations, LMTD, Reynolds number, and writing or executing Python code scripts, algorithms, and internal tools.",
-    "GENERAL_ENGINEERING_REASONING": "General engineering reasoning, physics principles, materials science, thermodynamics, chemistry, and technical questions.",
+    "MULTIMODAL_IMAGE_INSPECTION": "Visual image inspection, examine photos, review blueprints, P&ID drawings, optical character recognition OCR, and visual defect detection in images.",
+    "STANDARDS_AND_GOVERNANCE_REASONING": "Regulatory statutory compliance, safety guidelines, operating procedures, audits, statutory governance, and technical standard rules.",
+    "ENGINEERING_MATH_AND_CODE": "Write code, programming functions, scripts, algorithms, mathematical equations, physics simulations, plot engineering curves, render charts, generate diagrams, and execute Python code.",
+    "ENTERPRISE_DELIVERABLE_SYNTHESIS": "Generate formatted office reports, structured summary documents, presentation slide decks, and tabular data spreadsheets.",
+    "GENERAL_ENGINEERING_REASONING": "Conversational greetings, general inquiries, conceptual discussions, plant engineering explanations, and open-ended technical questions.",
 }
 
 
 class DynamicTaskRouter:
-    """Routes tasks using on-premises semantic vector embeddings and cosine similarity."""
+    """Routes tasks using 100% on-premises semantic vector embeddings and cosine similarity."""
 
     def __init__(self):
         self._centroids = {}
@@ -57,7 +58,7 @@ class DynamicTaskRouter:
         if has_doc:
             return "DOCUMENT_RAG_ANALYSIS", "Attached reference document", 1.0
 
-        # Semantic Vector Cosine Similarity
+        # Pure Semantic Vector Cosine Similarity
         try:
             q_vec = np.array(emb_fn([prompt])[0])
             q_norm = np.linalg.norm(q_vec)
@@ -66,7 +67,7 @@ class DynamicTaskRouter:
             scores = {cat: float(np.dot(q_unit, c_vec)) for cat, c_vec in self._centroids.items()}
             best_cat = max(scores, key=scores.get)
             confidence = round(max(0.75, min(0.99, scores[best_cat] + 0.5)), 2)
-            return best_cat, f"Matched semantic intent vector with score {scores[best_cat]:.3f}", confidence
+            return best_cat, f"Matched semantic intent vector ({best_cat}) with score {scores[best_cat]:.3f}", confidence
         except Exception:
             return "GENERAL_ENGINEERING_REASONING", "Default technical reasoning fallback", 0.80
 
@@ -81,11 +82,10 @@ class DynamicTaskRouter:
         has_doc = self._has_doc_attachment(attachments)
         category, reason, confidence = self._determine_category(prompt, has_image, has_doc)
 
-        # Auto-select the specialized model for this specific task category from model.yaml
         target_model = get_model_for_task(category)
         model_id = target_model.get("id", "gemma3:4b")
         model_name = target_model.get("name", model_id)
-        reasons = [reason, f"Auto-selected specialized model: {model_name}"]
+        reasons = [reason, f"Dispatched model: {model_name}"]
 
         return RoutingDecision(
             task_category=category,

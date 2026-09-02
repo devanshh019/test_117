@@ -1,5 +1,4 @@
-#AARUSHI
-
+# Local Multimodal Vision and Image Inspection Engine
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional

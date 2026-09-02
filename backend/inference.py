@@ -1,3 +1,4 @@
+# Local Ollama Inference Engine and Multi-Turn LLM Client
 import httpx
 from typing import Dict, List, Any, Optional
 

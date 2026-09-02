@@ -11,7 +11,7 @@ echo "================================================================="
 source .venv/bin/activate
 export PYTHONUNBUFFERED=1
 
-echo "Starting Sovereign Gateway at http://127.0.0.1:8000 ..."
+echo "Starting Sovereign Gateway at http://127.0.0.1:8030 ..."
 .venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
 
