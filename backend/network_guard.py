@@ -8,8 +8,8 @@ from .config import (
     APP_NAME,
     HOST,
     PORT,
+    AUDIT_ROOT_SEED_PREFIX,
 )
-
 
 
 class AirGapSentinel:
@@ -31,7 +31,7 @@ class AirGapSentinel:
         )
 
     def _compute_root_hash(self) -> str:
-        seed = f"KAVACH_ROOT_{self.start_time.isoformat()}"
+        seed = f"{AUDIT_ROOT_SEED_PREFIX}_{self.start_time.isoformat()}"
         return hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
     def record_audit_event(

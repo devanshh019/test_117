@@ -2,39 +2,17 @@
 from __future__ import annotations
 
 import os
-import resource
 import shutil
 import subprocess
 import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, Any, List
 
-from ..schemas import PySpec, CodeDeliverable, ExecutionResult, DocType
+from ..schemas import PySpec, CodeDeliverable, ExecutionResult
 
 MAX_OUTPUT_CHARS = 10_000
 PLOT_DPI = 300
-
-
-def _limit_resources(cpu_seconds: int, memory_mb: int):
-    """Runs in the CHILD process (preexec_fn) right before exec. Caps CPU time, memory, and procs."""
-    def _set():
-        try:
-            resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
-        except Exception:
-            pass
-        try:
-            if hasattr(resource, "RLIMIT_AS"):
-                resource.setrlimit(resource.RLIMIT_AS, (memory_mb * 1024 * 1024, memory_mb * 1024 * 1024))
-        except Exception:
-            pass
-        try:
-            if hasattr(resource, "RLIMIT_NPROC"):
-                resource.setrlimit(resource.RLIMIT_NPROC, (32, 32))
-        except Exception:
-            pass
-    return _set
 
 
 def _truncate(text: str) -> str:
@@ -44,7 +22,7 @@ def _truncate(text: str) -> str:
 
 
 def _build_harness(user_code: str, plot_path: Path) -> str:
-    """Headless matplotlib capture, pinned to ONE known path per run."""
+    """Headless matplotlib capture pinned to one known path per run."""
     return (
         "import os\n"
         "os.environ['MPLCONFIGDIR'] = '/tmp/mplcache'\n"
@@ -80,41 +58,46 @@ class PyExecutor:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Run 1: Execution & verification in an isolated UUID scratch dir
-        draft_result, run_dir = self._run_once(spec.code, spec.timeout_seconds)
+        run_dir: Path | None = None
+        try:
+            # Run: Execution & verification in an isolated UUID scratch dir
+            draft_result, run_dir = self._run_once(spec.code, spec.timeout_seconds)
 
-        if not draft_result.success:
+            if not draft_result.success:
+                return CodeDeliverable(
+                    filename=output_path.name,
+                    path="",
+                    size_bytes=0,
+                    execution=draft_result,
+                )
+
+            # Write deliverable script file
+            output_path.write_text(spec.code, encoding="utf-8")
+
+            # Copy any generated plot to the destination storage directory
+            run_plot = run_dir / "plot.png"
+            if run_plot.exists():
+                dest_plot_name = f"plot_{output_path.stem}.png"
+                dest_plot_path = output_path.parent / dest_plot_name
+                shutil.copyfile(run_plot, dest_plot_path)
+                plots = [{
+                    "filename": dest_plot_name,
+                    "path": f"/api/artifacts/{dest_plot_name}",
+                    "title": f"Plot ({output_path.stem})",
+                }]
+                draft_result.artifact_files = [dest_plot_name]
+                draft_result.plots = plots
+
             return CodeDeliverable(
                 filename=output_path.name,
-                path="",
-                size_bytes=0,
+                path=str(output_path),
+                size_bytes=os.path.getsize(output_path),
                 execution=draft_result,
             )
-
-        # Write deliverable script file
-        output_path.write_text(spec.code, encoding="utf-8")
-
-        # Copy any generated plot to the destination storage directory
-        run_plot = run_dir / "plot.png"
-        plots = []
-        if run_plot.exists():
-            dest_plot_name = f"plot_{output_path.stem}.png"
-            dest_plot_path = output_path.parent / dest_plot_name
-            shutil.copyfile(run_plot, dest_plot_path)
-            plots.append({
-                "filename": dest_plot_name,
-                "path": f"/api/artifacts/{dest_plot_name}",
-                "title": f"Plot ({output_path.stem})",
-            })
-            draft_result.artifact_files = [dest_plot_name]
-            draft_result.plots = plots
-
-        return CodeDeliverable(
-            filename=output_path.name,
-            path=str(output_path),
-            size_bytes=os.path.getsize(output_path),
-            execution=draft_result,
-        )
+        finally:
+            # Clean up the scratch dir to prevent leaking UUID dirs on disk
+            if run_dir is not None:
+                shutil.rmtree(run_dir, ignore_errors=True)
 
     def _run_once(self, code: str, timeout: int) -> tuple[ExecutionResult, Path]:
         run_dir = (self.sandbox_root / uuid.uuid4().hex).resolve()
@@ -125,13 +108,18 @@ class PyExecutor:
 
         start_time = time.time()
         try:
+            mem_kb = self.memory_mb * 1024
+            ulimit_cmd = (
+                f"ulimit -t {timeout} -d {mem_kb} -u 32 2>/dev/null; "
+                f"exec {sys.executable} script.py"
+            )
             proc = subprocess.run(
-                [sys.executable, "script.py"],
+                ["/bin/sh", "-c", ulimit_cmd],
                 cwd=str(run_dir),
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                preexec_fn=_limit_resources(timeout, self.memory_mb),
+                stdin=subprocess.DEVNULL,
                 env={**os.environ, "MPLCONFIGDIR": "/tmp/mplcache"},
             )
             duration_ms = int((time.time() - start_time) * 1000)

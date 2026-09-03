@@ -17,7 +17,7 @@ PRELOADED_SCENARIOS: List[Dict[str, Any]] = [
         "title": "Sandboxed Heat Exchanger Simulation & Code Verification",
         "badge": "Python Sandbox & Math",
         "badge_color": "cyan",
-        "target_model": "Gemma 3 4B (Code Sandbox & Math)",
+        "target_model": "Qwen 2.5 Coder 7B (Code Sandbox & Math)",
         "deliverables": [".py Executed Script", ".png Temperature Curve", "Thermal Summary"],
         "description": "Writes & runs an isolated Python simulation for Heat Exchanger E-204, calculating LMTD, thermal duty, and rendering Matplotlib temperature curves.",
         "prompt": "Write and execute a Python simulation for Shell & Tube Heat Exchanger E-204 in the sandbox. Calculate Heat Duty (Q), LMTD, and Overall Heat Transfer Coefficient (U) under counter-current flow (Hot: 280°C->160°C @ 35 kg/s; Cold: 45°C->130°C). Plot temperature profiles across tube length and verify energy conservation."
@@ -27,7 +27,7 @@ PRELOADED_SCENARIOS: List[Dict[str, Any]] = [
         "title": "Multimodal P&ID Drawing Safety & Tag Discrepancy Audit",
         "badge": "Vision & Drawing OCR",
         "badge_color": "emerald",
-        "target_model": "Gemma 3 4B (Multimodal & P&ID Vision)",
+        "target_model": "LLaVA 7B (Multimodal & P&ID Vision)",
         "deliverables": ["Annotated P&ID Blueprint", "Visual Bounding Boxes", "Safety Audit"],
         "description": "Visual coordinate inspection of P&ID drawing PID-ADU2-04-102, detecting control valves and flagging missing Double Block & Bleed isolation per SOP-SAF-402.",
         "prompt": "Inspect the P&ID drawing for Crude Feed Pre-Flash Train (PID-ADU2-04-102-REV4). Identify all control valves and transmitters, check the bypass line around FV-104 against refinery standard SOP-SAF-402, flag missing Double Block and Bleed (DBB) isolation, and generate a visual safety audit."

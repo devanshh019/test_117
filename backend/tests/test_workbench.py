@@ -5,8 +5,7 @@ from pathlib import Path
 
 from backend.router import router
 from backend.model_manager import load_models, save_model, get_model_for_task
-from backend.sandbox_executor import sandbox
-from backend.document_generator import doc_service, DocxSpec, PptxSpec, XlsxSpec, CellRule, SectionSpec, SlideSpec
+from backend.document_generator import doc_service, py_executor, DocxSpec, PptxSpec, XlsxSpec, PySpec, CellRule, SectionSpec, SlideSpec
 from backend.multimodal_vision import vision_engine
 from backend.knowledge_base import knowledge_base
 from backend.network_guard import sentinel
@@ -42,10 +41,14 @@ class TestSovereignWorkbench(unittest.TestCase):
             "plt.plot(x, y)\n"
             "print('SANDBOX_CALC_OK:42')\n"
         )
-        res = sandbox.execute(script, script_name_prefix="test_sim")
-        self.assertTrue(res["success"])
-        self.assertIn("SANDBOX_CALC_OK:42", res["stdout"])
-        self.assertTrue(len(res["plots"]) > 0)
+        spec = PySpec(title="test_sim", code=script, timeout_seconds=15)
+        out_file = Path("backend/data/storage/test_sim.py")
+        deliv = py_executor.deliver(spec, out_file)
+        self.assertTrue(deliv.execution.success)
+        self.assertIn("SANDBOX_CALC_OK:42", deliv.execution.stdout)
+        self.assertTrue(len(deliv.execution.plots) > 0)
+        if out_file.exists():
+            os.remove(out_file)
 
     def test_03_industry_standard_document_service_and_renderers(self):
         """Verify Schema validation -> Strategy Renderer -> DocumentResult architecture"""
@@ -88,19 +91,30 @@ class TestSovereignWorkbench(unittest.TestCase):
         self.assertTrue(pptx_res.size_bytes > 10000)
 
     def test_04_dynamic_rag_pipeline(self):
-        """Verify dynamic text ingestion, chunking, and similarity search in RAG"""
-        doc_res = knowledge_base.ingest_text(
-            title="API 510 Pressure Vessel Inspection Standard",
-            text="API 510 Section 7.1 specifies calculation of corrosion rate and remaining life: Cr = (t_initial - t_actual) / Time. If remaining life is under 2 years, immediate maintenance turnaround is required.",
-            category="STANDARDS"
-        )
-        self.assertTrue(doc_res["success"])
-        self.assertTrue(doc_res["indexed_chunks"] >= 1)
+        """Verify dynamic file ingestion, chunking, and similarity search in RAG"""
+        import tempfile
+        test_text = "API 510 Section 7.1 specifies calculation of corrosion rate and remaining life: Cr = (t_initial - t_actual) / Time. If remaining life is under 2 years, immediate maintenance turnaround is required."
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tf:
+            tf.write(test_text)
+            temp_path = tf.name
 
-        search_results = knowledge_base.search("API 510 corrosion rate turnaround", top_k=2)
-        self.assertTrue(len(search_results) > 0)
-        self.assertIn("API 510", search_results[0]["title"])
-        self.assertIn("remaining life", search_results[0]["excerpt"].lower())
+        try:
+            doc_res = knowledge_base.ingest_file(
+                file_path=temp_path,
+                original_filename="Temporary_Test_Standard.txt"
+            )
+            self.assertTrue(doc_res["success"])
+            self.assertTrue(doc_res["indexed_chunks"] >= 1)
+
+            search_results = knowledge_base.search("API 510 corrosion rate turnaround", top_k=2)
+            self.assertTrue(len(search_results) > 0)
+            self.assertIn("remaining life", search_results[0]["excerpt"].lower())
+
+            # Clean up test document so persistent DB is not polluted
+            knowledge_base.delete_document(doc_res["doc_id"])
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
     def test_05_air_gap_sentinel_proof(self):
         """Verify zero external egress and cryptographic audit chain"""

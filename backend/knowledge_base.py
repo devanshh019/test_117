@@ -1,7 +1,6 @@
-# Local RAG Vector Knowledge Base with ChromaDB and Embeddings
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 import docx
 from chromadb.utils import embedding_functions
@@ -13,10 +12,10 @@ from langchain_core.documents import Document
 from .config import (
     CHROMA_DIR,
     SEED_DOCS_DIR,
-    KB_DOCS_DIR,
     RAG_CHUNK_SIZE,
     RAG_CHUNK_OVERLAP,
     RAG_DEFAULT_TOP_K,
+    CHROMA_COLLECTION_NAME,
 )
 
 
@@ -38,7 +37,7 @@ splitter = RecursiveCharacterTextSplitter(
 )
 
 vec_store = Chroma(
-    collection_name="kavach_standards",
+    collection_name=CHROMA_COLLECTION_NAME,
     embedding_function=LocalEmbeddings(),
     persist_directory=str(CHROMA_DIR),
 )
@@ -49,11 +48,11 @@ class LocalRAGKnowledgeBase:
 
     @staticmethod
     def extract_text_from_file(file_path: Path or str) -> str:
-        """Robust multi-format text extractor for PDF, DOCX, DOC, TXT, CSV, MD files."""
+        """text extractor for PDF, DOCX, DOC, TXT, CSV, MD files."""
         p = Path(file_path)
         ext = p.suffix.lower()
 
-        if ext in [".docx", ".doc"]:
+        if ext == ".docx":
             try:
                 doc = docx.Document(str(p))
                 paragraphs = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
@@ -106,6 +105,15 @@ class LocalRAGKnowledgeBase:
         if not chunks:
             raise ValueError(f"Document '{name}' contains no indexable text.")
 
+        # Deduplicate: remove any existing records with the same filename or title
+        existing_data = vec_store.get(include=["metadatas"])
+        ids_to_del = [
+            id_val for id_val, m in zip(existing_data.get("ids", []), existing_data.get("metadatas", []))
+            if m and (m.get("filename") == name or m.get("title") == name)
+        ]
+        if ids_to_del:
+            vec_store.delete(ids=ids_to_del)
+
         vec_store.add_documents(chunks)
         return {
             "success": True,
@@ -115,18 +123,6 @@ class LocalRAGKnowledgeBase:
             "document": {"doc_id": doc_id, "filename": name, "title": name},
         }
 
-    def ingest_text(self, title: str, text: str, category: str = "STANDARDS") -> Dict[str, Any]:
-        doc_id = f"DOC-{int(time.time() * 1000)}"
-        doc = Document(page_content=text, metadata={"doc_id": doc_id, "title": title, "filename": title})
-        chunks = splitter.split_documents([doc])
-        vec_store.add_documents(chunks)
-        return {
-            "success": True,
-            "filename": title,
-            "doc_id": doc_id,
-            "indexed_chunks": len(chunks),
-            "document": {"doc_id": doc_id, "title": title},
-        }
 
     def search(self, query: str, top_k: int = RAG_DEFAULT_TOP_K) -> List[Dict[str, Any]]:
         results = vec_store.similarity_search_with_score(query, k=top_k)
@@ -153,7 +149,7 @@ class LocalRAGKnowledgeBase:
         metas = vec_store.get(include=["metadatas"]).get("metadatas", [])
         seen = {}
         for m in metas:
-            if m.get("doc_id") and m["doc_id"] not in seen:
+            if m and m.get("doc_id") and m["doc_id"] not in seen:
                 seen[m["doc_id"]] = {
                     "doc_id": m["doc_id"],
                     "title": m.get("title", "Document"),
@@ -175,12 +171,15 @@ class LocalRAGKnowledgeBase:
 
 # Ingest Seed Documents on Startup
 def _seed_db():
-    if SEED_DOCS_DIR.exists() and len(vec_store.get().get("ids", [])) == 0:
+    if SEED_DOCS_DIR.exists():
+        existing_metas = vec_store.get(include=["metadatas"]).get("metadatas", [])
+        existing_names = set(m.get("filename", m.get("title")) for m in existing_metas if m)
         for p in SEED_DOCS_DIR.glob("*.*"):
-            try:
-                knowledge_base.ingest_file(p, original_filename=p.name)
-            except Exception:
-                pass
+            if p.name not in existing_names:
+                try:
+                    knowledge_base.ingest_file(p, original_filename=p.name)
+                except Exception:
+                    pass
 
 
 knowledge_base = LocalRAGKnowledgeBase()

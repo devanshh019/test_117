@@ -4,6 +4,7 @@ Style config, injected — not a global import like the old THEME dict.
 Swap this per-brand/per-tenant without touching renderer code.
 """
 from dataclasses import dataclass
+from ..config import ORGANIZATION_NAME, CONFIDENTIAL_TAG
 
 
 @dataclass(frozen=True)
@@ -16,8 +17,8 @@ class Theme:
     title_size: int = 40
     header_size: int = 28
     body_size: int = 18
-    org_title: str = "ORGANIZATION NAME"
-    confidential_tag: str = "CONFIDENTIAL"
+    org_title: str = ORGANIZATION_NAME
+    confidential_tag: str = CONFIDENTIAL_TAG
 
 
 DEFAULT_THEME = Theme()

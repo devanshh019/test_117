@@ -40,50 +40,6 @@ class MultimodalVisionEngine:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def analyze_scanned_inspection_sheet(self, image_path: Optional[str] = None) -> Dict[str, Any]:
-        """Analyzes a scanned inspection sheet image dynamically."""
-        if not image_path:
-            return {
-                "document_type": "INSPECTION_SHEET",
-                "status": "NO_FILE_SPECIFIED",
-                "message": "Please attach an inspection sheet image or PDF to analyze.",
-            }
-
-        inspection = self.inspect_image_file(image_path)
-        if not inspection.get("success"):
-            return inspection
-
-        info = inspection["image_info"]
-        return {
-            "document_type": "SCANNED_INSPECTION_RECORD",
-            "file": info["filename"],
-            "resolution": f"{info['width']}x{info['height']}",
-            "status": "IMAGE_LOADED_FOR_INFERENCE",
-            "analysis_ready": True,
-        }
-
-    def analyze_pid_diagram(self, diagram_path: Optional[str] = None) -> Dict[str, Any]:
-        """Analyzes a Piping & Instrumentation Diagram (P&ID) image dynamically."""
-        if not diagram_path:
-            return {
-                "drawing_status": "NO_DIAGRAM_SPECIFIED",
-                "message": "Please upload a P&ID diagram file for engineering schematic analysis.",
-            }
-
-        inspection = self.inspect_image_file(diagram_path)
-        if not inspection.get("success"):
-            return inspection
-
-        info = inspection["image_info"]
-        return {
-            "drawing_file": info["filename"],
-            "resolution": f"{info['width']}x{info['height']}",
-            "format": info["format"],
-            "status": "DIAGRAM_LOADED_FOR_INFERENCE",
-            "analysis_ready": True,
-        }
-
-
 # Shared vision engine instance
 vision_engine = MultimodalVisionEngine()
 

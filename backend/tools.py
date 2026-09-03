@@ -1,4 +1,5 @@
 # Sovereign Tool Registry and Dynamic ReAct Tool Handlers
+import re
 import json
 import time
 from pathlib import Path
@@ -6,7 +7,6 @@ from typing import Dict, List, Any, Optional, Callable
 from pydantic import BaseModel, Field
 
 from .knowledge_base import knowledge_base
-from .sandbox_executor import sandbox
 from .document_generator import doc_service, py_executor, DocxSpec, PptxSpec, XlsxSpec, PySpec, CodeDeliverable, CellRule, SectionSpec, SlideSpec
 from .multimodal_vision import vision_engine
 
@@ -87,8 +87,8 @@ class ToolRegistry:
         # 2. execute_python_code
         self.register_tool(
             name="execute_python_code",
-            description="Executes a Python script in an isolated sandbox. MUST provide the full Python script in 'code', e.g. {\"code\": \"def solve(): ...\\nprint(solve())\"}.",
-            parameters={"type": "object", "properties": {"code": {"type": "string", "description": "Complete Python script to execute"}}, "required": ["code"]},
+            description="Executes a Python script in an isolated headless sandbox. All inputs must be supplied as variables in the code (NEVER use input() as it causes timeout errors). Script must include print(...) to output results.",
+            parameters={"type": "object", "properties": {"code": {"type": "string", "description": "Complete Python script to execute with variables initialized in code (no interactive input() calls)"}}, "required": ["code"]},
             func=self._execute_code_wrapper,
         )
         # 3. generate_word_document

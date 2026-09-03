@@ -33,7 +33,8 @@ PORT = 8000
 # -----------------------------------------------------------------------------
 # Local Ollama Inference Settings
 # -----------------------------------------------------------------------------
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://192.168.137.87:11434")
+#OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_TIMEOUT_SECONDS = 180.0
 OLLAMA_HEALTH_TIMEOUT_SECONDS = 1.0
 DEFAULT_MODEL_ID = "gemma3:4b"
@@ -54,9 +55,18 @@ SANDBOX_CONFIG_DIR = ON_PREMISES_CACHE_DIR
 SANDBOX_MPL_CONFIG_DIR = str(ON_PREMISES_CACHE_DIR)
 
 # -----------------------------------------------------------------------------
-# Local RAG & Document Ingestion Settings
-# -----------------------------------------------------------------------------
 RAG_CHUNK_SIZE = 1000
 RAG_CHUNK_OVERLAP = 200
 RAG_DEFAULT_TOP_K = 3
+CHROMA_COLLECTION_NAME = os.environ.get("CHROMA_COLLECTION_NAME", "kavach_standards")
+
+# -----------------------------------------------------------------------------
+# Agent & File Format Configuration
+# -----------------------------------------------------------------------------
+MAX_REACT_ITERATIONS = int(os.environ.get("MAX_REACT_ITERATIONS", "3"))
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff")
+DOCUMENT_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt", ".csv", ".xlsx", ".pptx", ".md")
+AUDIT_ROOT_SEED_PREFIX = os.environ.get("AUDIT_ROOT_SEED_PREFIX", f"{APP_NAME}_ROOT")
+ORGANIZATION_NAME = os.environ.get("ORGANIZATION_NAME", "KAVACH Sovereign Enterprise")
+CONFIDENTIAL_TAG = os.environ.get("CONFIDENTIAL_TAG", "CONFIDENTIAL")
 

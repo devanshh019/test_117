@@ -51,6 +51,9 @@ frontend/.vite/
 backend/data/storage/*
 !backend/data/storage/.gitkeep
 backend/data/storage/chroma_db/
+backend/data/storage/on_premises_cache/
+backend/data/storage/uploads/
+backend/data/storage/kb_docs/
 backend/data/storage/temp_uploads/*
 !backend/data/storage/temp_uploads/.gitkeep
 backend/data/uploads/*
@@ -59,6 +62,8 @@ backend/data/vector_store/*
 !backend/data/vector_store/.gitkeep
 backend/data/cache/*
 !backend/data/cache/.gitkeep
+
+# Generated Office Documents, Plots & Simulation Deliverables
 *.docx
 *.pptx
 *.xlsx
@@ -68,6 +73,7 @@ agent_calc_*.py
 test_sim_*.py
 exec_sim_*.py
 sandbox_sim_*.py
+Dynamic_Hydrotest_Matrix_*.xlsx
 
 # Logs, Databases & Session Files
 *.log
@@ -76,6 +82,12 @@ sandbox_sim_*.py
 *.sqlite
 *.sqlite3
 *.db
+*.bin
+
+# Evaluation & Benchmark Outputs
+*report.json
+*benchmark*.json
+*evaluation*.json
 
 # Environment & Secrets
 .env
@@ -91,3 +103,4 @@ sandbox_sim_*.py
 *.swp
 *.swo
 *~
+

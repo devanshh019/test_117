@@ -915,6 +915,10 @@ export default function App() {
     // 1. Instantly check the router decision (<2ms) to immediately update UI header & status
     let predictedModel = healthData?.active_foundation_model || healthData?.active_model_id || "Local Model";
     let predictedCategory = "GENERAL_ENGINEERING_REASONING";
+    let isFallback = false;
+    let activeModelTag = predictedModel;
+    let requestedModelTag = predictedModel;
+    let fallbackMsg = null;
 
     try {
       const routeRes = await fetch('/api/route', {
@@ -926,20 +930,36 @@ export default function App() {
         const routeData = await routeRes.json();
         if (routeData.model_name) predictedModel = routeData.model_name;
         if (routeData.task_category) predictedCategory = routeData.task_category;
-        
-        // Immediately show the auto-selected model in the Top Header!
+        isFallback = !!routeData.is_fallback;
+        activeModelTag = routeData.active_model || predictedModel;
+        requestedModelTag = routeData.requested_model || routeData.selected_model_id || predictedModel;
+        fallbackMsg = routeData.fallback_message;
+
+        // Immediately show the auto-selected model in the Top Header with fallback indicator if active!
+        const headerDisplay = isFallback
+          ? `${activeModelTag} (Fallback from ${requestedModelTag})`
+          : predictedModel;
+
         setHealthData(prev => prev ? {
           ...prev,
-          active_foundation_model: predictedModel,
-          active_model_id: routeData.selected_model_id || prev.active_model_id
+          active_foundation_model: headerDisplay,
+          active_model_id: activeModelTag,
+          is_fallback: isFallback,
+          fallback_message: fallbackMsg
         } : prev);
       }
     } catch (e) {}
 
     setActiveTaskMeta({
       taskType: predictedCategory,
-      targetAction: `Executing task with ${predictedModel}`,
+      targetAction: isFallback
+        ? `Executing on fallback ${activeModelTag}`
+        : `Executing task with ${predictedModel}`,
       model: predictedModel,
+      activeModel: activeModelTag,
+      requestedModel: requestedModelTag,
+      isFallback: isFallback,
+      fallbackMessage: fallbackMsg,
       endpoint: healthData?.ollama_backend?.endpoint || "http://127.0.0.1:11434",
       networkEgress: "0 Bytes (Air-Gapped)"
     });
@@ -948,13 +968,15 @@ export default function App() {
     setLoadingSessionId(targetSessionId);
     setThinkingExpanded(false);
     
-    // Strict Per-Chat Session Isolation: only pass history belonging to this specific chat session
+    // Strict Per-Chat Session Isolation: only pass prior history (excluding current query and error notices)
     const targetSession = sessions.find(s => s.id === targetSessionId);
     const targetMessages = targetSession ? targetSession.messages : [];
-    const historyPayload = targetMessages.map(m => ({
-      role: m.role,
-      content: m.content
-    }));
+    const historyPayload = targetMessages
+      .filter(m => !m.isError && m.content !== query && !m.content.startsWith('Execution Notice:'))
+      .map(m => ({
+        role: m.role,
+        content: m.content
+      }));
 
 
     fetch('/api/agent/execute', {
@@ -974,6 +996,10 @@ export default function App() {
           content: data.summary,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           routing: data.routing,
+          fallback: data.fallback,
+          is_fallback: data.is_fallback,
+          requested_model: data.requested_model,
+          active_model: data.active_model,
           steps: data.steps,
           citations: data.citations,
           artifacts: data.artifacts,
@@ -991,10 +1017,13 @@ export default function App() {
         }
 
         if (data.routing && data.routing.model_name) {
+          const displayModel = data.is_fallback && data.active_model
+            ? `${data.active_model} (Fallback)`
+            : data.routing.model_name;
           setHealthData(prev => prev ? {
             ...prev,
-            active_foundation_model: data.routing.model_name,
-            active_model_id: data.routing.selected_model_id || prev.active_model_id,
+            active_foundation_model: displayModel,
+            active_model_id: data.active_model || data.routing.selected_model_id || prev.active_model_id,
           } : prev);
         }
 
@@ -1396,22 +1425,38 @@ export default function App() {
                         : 'bg-[#ffffff] border border-[#e5ded1] text-[#1c1917] rounded-2xl rounded-tl-sm p-5 shadow-sm space-y-3 text-xs leading-relaxed'
                     }`}
                   >
-                    {/* Assistant Meta - Prominent Model Auto-Selection Badge */}
+                    {/* Assistant Meta - Prominent Model Auto-Selection Badge & Fallback Banner */}
                     {msg.role === 'assistant' && msg.routing && (
-                      <div className="flex flex-wrap items-center justify-between pb-2.5 mb-1 border-b border-[#f0eae0] text-[11px] font-mono gap-2">
-                        <div className="flex items-center space-x-2">
-                          <span className="px-2 py-0.5 rounded bg-[#fff7ed] text-[#ea580c] border border-[#fed7aa] font-bold text-[10px] flex items-center space-x-1 shadow-2xs">
-                            <Cpu className="w-3 h-3" />
-                            <span>MODEL: {msg.routing.model_name}</span>
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded bg-[#f4efe6] text-[#78716c] border border-[#e5ded1] text-[10px] font-semibold">
-                            {msg.routing.task_category}
-                          </span>
+                      <div className="space-y-2 pb-2.5 mb-1 border-b border-[#f0eae0]">
+                        <div className="flex flex-wrap items-center justify-between text-[11px] font-mono gap-2">
+                          <div className="flex items-center space-x-2">
+                            <span className={`px-2 py-0.5 rounded border font-bold text-[10px] flex items-center space-x-1 shadow-2xs ${
+                              msg.fallback?.is_fallback || msg.is_fallback
+                                ? 'bg-[#fff7ed] text-[#c2410c] border-[#fed7aa]'
+                                : 'bg-[#fff7ed] text-[#ea580c] border-[#fed7aa]'
+                            }`}>
+                              <Cpu className="w-3 h-3" />
+                              <span>MODEL: {msg.active_model || msg.routing.model_name}</span>
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-[#f4efe6] text-[#78716c] border border-[#e5ded1] text-[10px] font-semibold">
+                              {msg.routing.task_category}
+                            </span>
+                          </div>
+                          {msg.elapsed_seconds && (
+                            <span className="text-[10px] text-[#78716c] bg-[#faf8f5] px-2 py-0.5 rounded border border-[#e5ded1]">
+                              Executed in {msg.elapsed_seconds}s
+                            </span>
+                          )}
                         </div>
-                        {msg.elapsed_seconds && (
-                          <span className="text-[10px] text-[#78716c] bg-[#faf8f5] px-2 py-0.5 rounded border border-[#e5ded1]">
-                            Executed in {msg.elapsed_seconds}s
-                          </span>
+
+                        {/* Explicit Fallback Notification Banner */}
+                        {(msg.fallback?.is_fallback || msg.is_fallback) && (
+                          <div className="p-2.5 rounded-lg bg-[#fff7ed] border border-[#fed7aa] text-[#9a3412] text-[11px] font-medium flex items-start space-x-2 shadow-2xs">
+                            <AlertCircle className="w-4 h-4 text-[#ea580c] shrink-0 mt-0.5" />
+                            <div className="leading-relaxed">
+                              <strong>Fallback Model Active:</strong> Model <code className="px-1.5 py-0.5 rounded bg-[#f4efe6] border border-[#e5ded1] font-mono text-[10px] text-[#ea580c] font-bold">{msg.fallback?.requested_model || msg.requested_model || msg.routing.selected_model_id}</code> was not available in local Ollama; currently executing on fallback model <code className="px-1.5 py-0.5 rounded bg-[#f4efe6] border border-[#e5ded1] font-mono text-[10px] text-[#ea580c] font-bold">{msg.fallback?.active_model || msg.active_model}</code>.
+                            </div>
+                          </div>
                         )}
                       </div>
                     )}
@@ -1733,8 +1778,11 @@ export default function App() {
                 <div className="flex items-center space-x-2">
                   <div className="inline-flex items-center space-x-2 py-1 px-3 rounded-full bg-[#fff7ed] border border-[#fed7aa] text-[11px] font-mono text-[#1c1917] w-fit shadow-xs">
                     <Cpu className="w-3.5 h-3.5 text-[#ea580c] animate-spin" />
-                    <span className="font-bold text-[#ea580c]">
-                      Agentic ReAct: {activeTaskMeta?.model || 'Local Model'}
+                    <span className="font-bold text-[#c2410c]">
+                      Agentic ReAct: {activeTaskMeta?.activeModel || activeTaskMeta?.model || 'Local Model'}
+                      {activeTaskMeta?.isFallback && (
+                        <span className="ml-1 text-[10px] text-[#ea580c] font-semibold">(Fallback Active)</span>
+                      )}
                     </span>
                     <span className="text-[#fed7aa]">•</span>
                     <span className="text-[#9a3412] font-bold text-[10px]">{elapsedTimer}s</span>
@@ -1764,7 +1812,7 @@ export default function App() {
 
                     <div className="space-y-1.5">
                       {/* Step 1: Real Intent Classification & Dispatched Persona */}
-                      <div className="p-2 rounded-lg bg-[#faf8f5] border border-[#e5ded1] space-y-1">
+                      <div className="p-2 rounded-lg bg-[#faf8f5] border border-[#e5ded1] space-y-1.5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
                             <CheckCircle2 className="w-3.5 h-3.5 text-[#16a34a] shrink-0" />
@@ -1780,6 +1828,14 @@ export default function App() {
                         <div className="text-[10px] text-[#78716c] pl-5.5">
                           Dispatched Persona: <strong className="text-[#1c1917]">{activeTaskMeta?.model || 'Gemma 3 4B Sovereign Standards & Governance'}</strong>
                         </div>
+                        {activeTaskMeta?.isFallback && (
+                          <div className="mt-1 p-2 rounded bg-[#fff7ed] border border-[#fed7aa] text-[#9a3412] text-[10px] flex items-start space-x-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-[#ea580c] shrink-0 mt-0.5" />
+                            <div className="leading-tight">
+                              <strong>Fallback Triggered:</strong> Model <code className="px-1 py-0.5 rounded bg-[#f4efe6] font-mono text-[9px] text-[#ea580c]">{activeTaskMeta?.requestedModel}</code> not found in local Ollama; executing on <code className="px-1 py-0.5 rounded bg-[#f4efe6] font-mono text-[9px] text-[#ea580c] font-bold">{activeTaskMeta?.activeModel}</code>.
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Step 2: Real Active ReAct Agent Execution Loop */}

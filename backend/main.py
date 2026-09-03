@@ -19,6 +19,9 @@ from .config import (
     UPLOADS_DIR,
     KB_DOCS_DIR,
     FRONTEND_DIST_DIR,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_MODEL_ID,
+    CONFIDENTIAL_TAG,
 )
 
 
@@ -89,9 +92,9 @@ def get_health():
         "status": "HEALTHY",
         "air_gap_verified": True,
         "organization": APP_NAME,
-        "security_classification": "CONFIDENTIAL",
-        "active_foundation_model": active.get("name", "Gemma 3 4B"),
-        "active_model_id": active.get("id", "gemma3:4b"),
+        "security_classification": CONFIDENTIAL_TAG,
+        "active_foundation_model": active.get("name", DEFAULT_MODEL_NAME),
+        "active_model_id": active.get("id", DEFAULT_MODEL_ID),
         "ollama_backend": ollama_info,
         "engine_mode": "SOVEREIGN_AIR_GAPPED_LOCAL",
     }
@@ -151,7 +154,30 @@ def select_active_model(req: SelectModelRequest):
 def test_routing(req: RouteTestRequest):
     """Tests task routing and persona dispatch."""
     decision = router.route_task(req.prompt, req.attachments)
-    return decision.model_dump()
+    data = decision.model_dump()
+    health = inference_engine.check_local_ollama_health()
+    installed = health.get("models", [])
+    target = decision.selected_model_id
+    is_fallback = bool(installed and target not in installed)
+    if is_fallback:
+        default_candidate = get_active_model().get("id", DEFAULT_MODEL_ID)
+        if default_candidate in installed:
+            active = default_candidate
+        elif DEFAULT_MODEL_ID in installed:
+            active = DEFAULT_MODEL_ID
+        elif installed:
+            active = installed[0]
+        else:
+            active = DEFAULT_MODEL_ID
+    else:
+        active = target
+
+    data["is_fallback"] = is_fallback
+    data["requested_model"] = target
+    data["active_model"] = active
+    if is_fallback:
+        data["fallback_message"] = f"Model '{target}' was not available in local Ollama, currently executing on fallback model '{active}'."
+    return data
 
 
 @app.post("/api/upload")

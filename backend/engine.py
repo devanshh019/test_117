@@ -5,6 +5,7 @@ import json
 import base64
 from typing import Dict, List, Any, Optional, Tuple
 
+from .config import MAX_REACT_ITERATIONS, IMAGE_EXTENSIONS
 from .router import router, RoutingDecision
 from .inference import inference_engine
 from .network_guard import sentinel
@@ -64,7 +65,7 @@ class SovereignAgentEngine:
     Maintains state across multi-turn thought-action-observation cycles with tool calling & direct Q&A.
     """
 
-    def __init__(self, max_iterations: int = 6):
+    def __init__(self, max_iterations: int = MAX_REACT_ITERATIONS):
         self.router = router
         self.inference = inference_engine
         self.sentinel = sentinel
@@ -214,7 +215,10 @@ class SovereignAgentEngine:
             f"1. DEFAULT TO PLAIN TEXT: For greetings, general chat, explanations, standards discussions, and conceptual inquiries, ALWAYS respond directly in plain text. NEVER create any files, documents, or spreadsheets unless explicitly asked.\n"
             f"2. NO UNPROMPTED DELIVERABLES: NEVER call `generate_word_document`, `generate_powerpoint_presentation`, or `generate_excel_spreadsheet` unless the user's current request explicitly asks to generate or create a document, presentation, or spreadsheet.\n"
             f"3. KNOWLEDGE BASE SEARCH: Call `search_knowledge_base` only when domain technical standards, specifications, or formulas are needed to answer the query.\n"
-            f"4. PYTHON CODE EXECUTION: When writing Python with `execute_python_code`, always include a function call with `print(...)` so the calculation result is outputted and verified in the sandbox.\n"
+            f"4. PYTHON CODE EXECUTION & NO INTERACTIVE INPUT: When writing Python with `execute_python_code`:\n"
+            f"   - NEVER call the interactive `input()` function. Execution is automated and headless in the sandbox.\n"
+            f"   - If user input or parameters are needed (for games, simulations, calculators), MIMIC THE USER by assigning sample values directly to variables (e.g. `user_choice = 'rock'  # take user input here` or `user_guess = 50  # take user input here`).\n"
+            f"   - Always include function calls with `print(...)` so the simulated execution results are outputted and verified in the sandbox.\n"
             f"5. REACT TOOL INVOCATION FORMAT (ONLY WHEN USING A TOOL):\n"
             f"   Thought: <brief reasoning for using tool>\n"
             f"   Action: <exact tool name>\n"
@@ -240,7 +244,7 @@ class SovereignAgentEngine:
             name = att.get("name") or att.get("filename") or "attachment"
             path = att.get("local_path") or att.get("path")
             names.append(name)
-            if path and path.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+            if path and path.lower().endswith(IMAGE_EXTENSIONS):
                 try:
                     with open(path, "rb") as f:
                         b64_images.append(base64.b64encode(f.read()).decode("utf-8"))
@@ -281,24 +285,61 @@ class SovereignAgentEngine:
         # 1. Routing & System Prompt
         r_start = time.time()
         decision = self.router.route_task(prompt, attachments)
+        target_model = override_model or decision.selected_model_id
+
+        # Check local Ollama health to detect if fallback model is used
+        health = self.inference.check_local_ollama_health()
+        installed = health.get("models", [])
+        is_fallback = bool(installed and target_model not in installed)
+        if is_fallback:
+            from .model_manager import get_active_model
+            from .config import DEFAULT_MODEL_ID
+            default_candidate = get_active_model().get("id", DEFAULT_MODEL_ID)
+            if default_candidate in installed:
+                active_model_tag = default_candidate
+            elif DEFAULT_MODEL_ID in installed:
+                active_model_tag = DEFAULT_MODEL_ID
+            elif installed:
+                active_model_tag = installed[0]
+            else:
+                active_model_tag = DEFAULT_MODEL_ID
+        else:
+            active_model_tag = target_model
+
+        if is_fallback:
+            dispatch_detail = (
+                f"Classified as '{decision.task_category}'. "
+                f"⚠️ Note: Model '{target_model}' is not installed in local Ollama; executing on fallback model '{active_model_tag}'."
+            )
+        else:
+            dispatch_detail = f"Classified as '{decision.task_category}'. Dispatched: {decision.model_name}."
+
         state.add_step(
             "Intent Classification & Persona Dispatch", "COMPLETED", int((time.time() - r_start) * 1000),
-            f"Classified as '{decision.task_category}'. Dispatched: {decision.model_name}.",
+            dispatch_detail,
         )
 
         attached_text, b64_images = self._process_attachments(state)
-        target_model = override_model or decision.selected_model_id
         sys_prompt = self._build_system_prompt(decision, attached_text)
+
+        seen_action_signatures = set()
 
         for turn in range(1, self.max_iterations + 1):
             t_start = time.time()
             if turn == 1:
-                turn_prompt = f"User Request: {state.prompt}\n\nRespond directly in plain text or use Thought/Action if tools are needed."
+                turn_prompt = (
+                    f"User Request: {state.prompt}\n\n"
+                    f"Execute the request completely using Thought/Action when tools, calculations, or deliverables are needed, or respond directly in plain text.\n"
+                    f"(Note: When writing Python, do NOT call input(). Assign sample test values directly to variables e.g. `user_guess = 50  # take user input here` and print results)."
+                )
             else:
                 turn_prompt = (
                     f"User Request: {state.prompt}\n\n"
                     f"Working Memory & Tool Observations:\n{state.scratchpad}\n\n"
-                    f"Based on the Observations, execute the next tool or conclude with 'Final Answer:'."
+                    f"CRITICAL SELF-CORRECTION GUIDELINES:\n"
+                    f"1. If a previous tool execution returned an Error or Exception, carefully inspect the Observation message.\n"
+                    f"2. You MUST self-correct by providing fixed code with all variables initialized directly (do NOT use input()).\n"
+                    f"3. If all requested work is completed, conclude with 'Final Answer:' and provide your final response."
                 )
 
             llm_res = self.inference.generate(
@@ -318,6 +359,24 @@ class SovereignAgentEngine:
             actions = self._extract_all_actions(raw)
             if actions:
                 for act_name, act_args in actions:
+                    sig = (act_name, json.dumps(act_args, sort_keys=True))
+                    if sig in seen_action_signatures:
+                        state.scratchpad += (
+                            f"Action: {act_name}\n"
+                            f"Action Input: {json.dumps(act_args)}\n"
+                            f"Observation: Duplicate action detected. This identical code was already executed and resulted in the error above. "
+                            f"Do NOT execute the exact same code again. Either modify the code or provide your 'Final Answer:' explaining the implementation.\n\n"
+                        )
+                        state.add_step(
+                            f"ReAct Turn {turn}: Duplicate `{act_name}` Guard",
+                            "WARNING",
+                            int((time.time() - t_start) * 1000),
+                            "Duplicate action detected. Awaiting corrected code or Final Answer.",
+                        )
+                        continue
+
+                    seen_action_signatures.add(sig)
+
                     tool_res = self.tool_registry.execute_tool(act_name, act_args)
                     if tool_res.deliverables:
                         state.add_deliverables(tool_res.deliverables)
@@ -335,7 +394,7 @@ class SovereignAgentEngine:
                 if final_match:
                     state.final_answer = final_match.group(1).strip()
                     break
-                # If only 1 tool was executed and more might be needed, continue to next turn of ReAct loop!
+
                 continue
 
             thought, action, action_input, final_answer = self._parse_react_response(raw)
@@ -350,16 +409,32 @@ class SovereignAgentEngine:
                 state.add_step(f"ReAct Turn {turn}: Direct Response", "COMPLETED", int((time.time() - t_start) * 1000), "Generated direct response.")
                 break
 
-        if not state.final_answer:
+        if not state.final_answer or "Action:" in state.final_answer:
             if state.deliverables:
-                files_list = ", ".join(f"`{d.get('filename')}`" for d in state.deliverables)
-                state.final_answer = f"Task completed successfully. Generated {len(state.deliverables)} deliverable(s): {files_list}."
+                files_md = "\n".join(f"- **{d.get('filename')}** ({d.get('type', 'deliverable').upper()})" for d in state.deliverables)
+                state.final_answer = (
+                    f"### Engineering Assessment Package Completed\n\n"
+                    f"Successfully generated **{len(state.deliverables)}** deliverable(s) based on retrieved standards and engineering evaluations:\n\n"
+                    f"{files_md}\n\n"
+                    f"*Click on any deliverable card below or inspect it in the Deliverables panel on the right.*"
+                )
             else:
-                clean_scratchpad = re.sub(r"(?i)^(Thought|Action|Action Input|Observation):.*?\n", "", state.scratchpad, flags=re.MULTILINE).strip()
-                state.final_answer = clean_scratchpad or "Task execution completed."
+                # If raw tool action remains in scratchpad and no deliverables exist, extract code cleanly
+                from .document_generator.code_extraction import extract_code
+                ext = extract_code(state.scratchpad) or extract_code(raw)
+                if ext and ext.code:
+                    state.final_answer = f"Here is the Python implementation:\n\n```python\n{ext.code}\n```"
+                else:
+                    clean_scratchpad = re.sub(r"(?i)^(Thought|Action|Action Input|Observation):.*?\n", "", state.scratchpad, flags=re.MULTILINE).strip()
+                    state.final_answer = clean_scratchpad or "Task execution completed."
 
         if state.final_answer:
             # Clean generic ReAct prefix tags if left over in output
+            if not state.deliverables and ("Action: execute_python_code" in state.final_answer or "Action Input:" in state.final_answer):
+                from .document_generator.code_extraction import extract_code
+                ext = extract_code(state.final_answer)
+                if ext and ext.code:
+                    state.final_answer = f"Here is the Python implementation:\n\n```python\n{ext.code}\n```"
             cleaned = re.sub(r"(?i)^\s*(?:Thought|Action|Action Input|Observation):\s*", "", state.final_answer, flags=re.MULTILINE).strip()
             cleaned = re.sub(r"(?i)^\s*Final Answer:\s*", "", cleaned).strip()
             cleaned = re.sub(r"^<(?:text|response|output|clean response in plain text)>\s*", "", cleaned, flags=re.IGNORECASE).strip()
@@ -376,10 +451,21 @@ class SovereignAgentEngine:
             metadata={"task_id": task_id, "duration_ms": total_elapsed_ms, "deliverables": len(state.deliverables)},
         )
 
+        fallback_info = {
+            "is_fallback": is_fallback,
+            "requested_model": target_model,
+            "active_model": active_model_tag,
+            "message": f"Model '{target_model}' was not available in local Ollama, currently executing on fallback model '{active_model_tag}'." if is_fallback else None,
+        }
+
         return {
             "task_id": task_id,
             "prompt": prompt,
             "routing": decision.model_dump(),
+            "fallback": fallback_info,
+            "is_fallback": is_fallback,
+            "requested_model": target_model,
+            "active_model": active_model_tag,
             "final_answer": state.final_answer,
             "summary": state.final_answer,
             "steps": state.steps,
@@ -393,7 +479,9 @@ class SovereignAgentEngine:
                 "air_gap_enforced": True,
                 "air_gap_verified": True,
                 "outbound_bytes": 0,
-                "local_inference_model": target_model,
+                "local_inference_model": active_model_tag,
+                "requested_model": target_model,
+                "is_fallback": is_fallback,
                 "audit_hash": audit_event["event_hash"],
             },
         }

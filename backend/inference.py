@@ -6,6 +6,7 @@ from .config import (
     OLLAMA_BASE_URL,
     OLLAMA_TIMEOUT_SECONDS,
     OLLAMA_HEALTH_TIMEOUT_SECONDS,
+    DEFAULT_MODEL_ID,
     MODEL_TEMPERATURE,
     MODEL_TOP_P,
     MODEL_CONTEXT_WINDOW,
@@ -15,7 +16,7 @@ from .model_manager import get_active_model, set_active_model
 
 
 class LocalSovereignInference:
-    """Client for local Ollama HTTP API (http://127.0.0.1:11434)."""
+    """Client for local Ollama HTTP API."""
 
     def __init__(self):
         self.ollama_url = OLLAMA_BASE_URL
@@ -33,7 +34,7 @@ class LocalSovereignInference:
         WITHOUT mutating the active model state.
         """
         active = get_active_model()
-        active_id = active.get("id", "gemma3:4b")
+        active_id = active.get("id", DEFAULT_MODEL_ID)
         try:
             resp = self.client.get(
                 f"{self.ollama_url}/api/tags",
@@ -58,20 +59,26 @@ class LocalSovereignInference:
             "endpoint": self.ollama_url,
         }
 
-    def _resolve_target_model(self, model_id: Optional[str], installed_models: List[str]) -> str:
-        """Determines which model tag to use for inference, prioritizing router auto-selection."""
+    def _resolve_target_model(self, model_id: Optional[str], installed_models: List[str]) -> tuple[str, bool, Optional[str]]:
+        """Determines which model tag to use for inference. Returns (target_model, is_fallback, requested_model)."""
         # 1. Target model assigned by the Router for this specific task
         if model_id and (not installed_models or model_id in installed_models):
-            return model_id
+            return model_id, False, model_id
         # 2. User manual override
         if self.selected_model and self.selected_model in installed_models:
-            return self.selected_model
-        # 3. First available installed model
-        if installed_models:
-            return installed_models[0]
-        return get_active_model().get("id", "gemma3:4b")
+            return self.selected_model, False, self.selected_model
+        # 3. Default fallback model (prefers Gemma 3 4B / DEFAULT_MODEL_ID if installed, else first available)
+        default_candidate = get_active_model().get("id", DEFAULT_MODEL_ID)
+        if default_candidate in installed_models:
+            fallback_model = default_candidate
+        elif DEFAULT_MODEL_ID in installed_models:
+            fallback_model = DEFAULT_MODEL_ID
+        elif installed_models:
+            fallback_model = installed_models[0]
+        else:
+            fallback_model = DEFAULT_MODEL_ID
 
-
+        return fallback_model, (model_id is not None and model_id != fallback_model), model_id
 
     def _build_messages_payload(
         self,
@@ -86,11 +93,17 @@ class LocalSovereignInference:
             messages.append({"role": "system", "content": system_prompt})
 
         if history:
-            recent_turns = history[-MAX_HISTORY_TURNS:]
+            clean_history = [
+                h for h in history
+                if h.get("content")
+                and not h.get("content", "").startswith("Execution Notice:")
+                and h.get("content") != prompt
+            ]
+            recent_turns = clean_history[-MAX_HISTORY_TURNS:]
             for item in recent_turns:
                 role = "user" if item.get("role") == "user" else "assistant"
                 content = item.get("content", "")
-                if content and not content.startswith("> [!WARNING]"):
+                if content:
                     messages.append({"role": role, "content": content})
 
         user_msg: Dict[str, Any] = {"role": "user", "content": prompt}
@@ -116,20 +129,18 @@ class LocalSovereignInference:
                 "model_online": False,
                 "response": (
                     "> [!WARNING]\n"
-                    "> **Local Inference Engine Offline**: Could not connect to Ollama at `http://127.0.0.1:11434`.\n\n"
+                    f"> **Local Inference Engine Offline**: Could not connect to Ollama at `{self.ollama_url}`.\n\n"
                     "**To start Ollama**:\n"
                     "```bash\n"
-                    "ollama run llama3  # or: ollama run gemma3:4b\n"
+                    f"ollama run {DEFAULT_MODEL_ID}\n"
                     "```"
                 ),
                 "model_used": "None (Ollama Offline)",
             }
 
-        target_model = self._resolve_target_model(model_id, health["models"])
+        target_model, is_fallback, requested_model = self._resolve_target_model(model_id, health["models"])
         set_active_model(target_model)
         messages_payload = self._build_messages_payload(prompt, system_prompt, history, images)
-
-
 
         try:
             chat_payload = {
@@ -140,27 +151,24 @@ class LocalSovereignInference:
                     "temperature": MODEL_TEMPERATURE,
                     "top_p": MODEL_TOP_P,
                     "num_ctx": MODEL_CONTEXT_WINDOW,
-                },
+                }
             }
-            res = self.client.post(
-                f"{self.ollama_url}/api/chat",
-                json=chat_payload,
-                timeout=OLLAMA_TIMEOUT_SECONDS,
-            )
-
-            if res.status_code == 200:
-                content = res.json().get("message", {}).get("content", "").strip()
+            resp = self.client.post(f"{self.ollama_url}/api/chat", json=chat_payload)
+            if resp.status_code == 200:
+                body = resp.json()
+                assistant_response = body.get("message", {}).get("content", "").strip()
                 return {
-                    "success": bool(content),
-                    "model_online": True,
-                    "response": content or "> [!WARNING]\n> Empty response received.",
-                    "model_used": f"Ollama ({target_model})",
+                    "success": True,
+                    "response": assistant_response,
+                    "model_used": target_model,
+                    "is_fallback": is_fallback,
+                    "requested_model": requested_model,
                 }
 
             return {
                 "success": False,
                 "model_online": False,
-                "response": f"> [!WARNING]\n> **Ollama HTTP Error {res.status_code}**: {res.text}",
+                "response": f"> [!WARNING]\n> **Ollama HTTP Error {resp.status_code}**: {resp.text}",
                 "model_used": f"Ollama ({target_model})",
             }
         except Exception as e:
